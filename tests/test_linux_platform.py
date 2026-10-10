@@ -245,7 +245,6 @@ class TestLinuxAccessibility(unittest.TestCase):
 
 @pytest.mark.linux
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux-specific smoke test")
-@pytest.mark.integration
 def test_linux_capture_smoke():
     """
     Headless smoke test: verify capture can start without crashing.
