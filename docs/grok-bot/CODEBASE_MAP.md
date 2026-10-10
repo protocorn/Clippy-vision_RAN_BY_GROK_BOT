@@ -574,7 +574,7 @@ npm run dist             # Build installer (Windows or macOS)
 
 4. **Privacy redaction is best-effort, not guaranteed**
    - Password field detection heuristics can miss some fields
-   - Private browsing only covers Chrome, Edge, Brave (not Firefox, Opera, Safari)
+   - Private browsing covers Chrome, Edge, Brave, Firefox (Windows), Opera (Windows), Vivaldi (Windows); Safari not covered on macOS
    - Secret regex patterns may not catch all token formats
 
 5. **No built-in chat UI**

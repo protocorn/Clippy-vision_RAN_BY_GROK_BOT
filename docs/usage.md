@@ -37,6 +37,10 @@ Private browsing protection is on by default for **Google Chrome**, **Microsoft 
 - The address is not stored.
 - The title is saved as "Private window".
 
+Chrome (Incognito), Edge (InPrivate), and Brave (Private) are covered on Windows and macOS. Firefox Private Browsing, Opera, and Vivaldi are covered on Windows.
+
+Safari private windows are not covered on macOS.
+
 Firefox, Opera, and Safari are not covered. Pause capture when those private windows must not be stored.
 
 ### What the privacy layer does

@@ -85,11 +85,11 @@ Prioritized improvement plan for the Clippy-vision_RAN_BY_GROK_BOT experimental 
 
 ### 1.4 Privacy Redaction Coverage
 
-**Problem:** Private browsing redaction only covers Chrome, Edge, and Brave. Firefox, Opera, and Safari private windows are captured normally. Password field detection uses heuristics that may miss some fields.
+**Problem:** Private browsing redaction covers Chrome, Edge, and Brave (documented in `PROJECT_VISION.md`). Password field detection uses heuristics that may miss some fields.
 
 **Rationale:** Privacy is a core principle. Expanding browser coverage and improving detection reduces accidental leaks.
 
-**Effort:** Small-medium (hypothesis: 1-2 weeks for Firefox/Opera, tested)
+**Effort:** Small-medium (hypothesis: 1-2 weeks for Firefox/Opera/Vivaldi, tested)
 
 **Sub-items:**
 - **Firefox private windows:** Detect and black out before storage
