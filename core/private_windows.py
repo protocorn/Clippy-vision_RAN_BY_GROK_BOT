@@ -130,11 +130,9 @@ def control_is_private(control, process_name: str) -> bool | None:
     
     For Firefox, checks window and child element names for "Private Browsing" markers.
     For Chromium-based browsers, checks BrowserRootView for parenthetical private label.
-    """
-    from core.platform_support import IS_WINDOWS
     
-    if not IS_WINDOWS:
-        return None
+    This function works with both real Windows controls and mock objects for testing.
+    """
     if control is None:
         return None
     

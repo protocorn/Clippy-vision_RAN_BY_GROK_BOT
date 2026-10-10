@@ -117,11 +117,11 @@ class TestLinuxMetadata(unittest.TestCase):
         if "core.platform_support" in sys.modules:
             del sys.modules["core.platform_support"]
         
-        # Mock psutil to resolve PID
-        with patch("core.platform_support.psutil") as mock_psutil:
+        # Mock psutil inside the module (it's imported locally in _linux_metadata)
+        with patch("psutil.Process") as mock_process_cls:
             mock_process = MagicMock()
             mock_process.name.return_value = "firefox"
-            mock_psutil.Process.return_value = mock_process
+            mock_process_cls.return_value = mock_process
             
             from core import platform_support
             

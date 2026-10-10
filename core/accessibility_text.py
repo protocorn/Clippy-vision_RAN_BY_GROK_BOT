@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import heapq
 import re
+import sys
 from collections import deque
 import threading
 from core.platform_support import IS_MACOS, IS_WINDOWS, IS_LINUX, _run_command
