@@ -47,9 +47,9 @@ jobs:
           # - @pytest.mark.integration - full integration tests
           
           if [ "$RUNNER_OS" == "Windows" ]; then
-            # Run all tests except macOS-specific, GUI, Ollama, and integration
+            # Run all tests except macOS/Linux-specific, GUI, Ollama, and integration
             # Skip problematic path tests with 8.3 short names
-            pytest tests/ -v -m "not macos and not requires_gui and not requires_ollama and not integration" \
+            pytest tests/ -v -m "not linux and not macos and not requires_gui and not requires_ollama and not integration" \
               -k "not test_infer_project_root_from_file and not test_resolve_screenshot_file_accepts_the_processed_name"
           else
             # Ubuntu: run all tests except Windows/macOS-specific, GUI, Ollama, and integration
