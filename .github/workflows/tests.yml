@@ -35,6 +35,8 @@ jobs:
         run: pip list
       
       - name: Run tests with pytest markers
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           # Tests are marked with platform-specific markers:
           # - @pytest.mark.windows - Windows UI Automation tests
