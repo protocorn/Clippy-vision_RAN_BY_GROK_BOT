@@ -131,6 +131,10 @@ def control_is_private(control, process_name: str) -> bool | None:
     For Firefox, checks window and child element names for "Private Browsing" markers.
     For Chromium-based browsers, checks BrowserRootView for parenthetical private label.
     """
+    from core.platform_support import IS_WINDOWS
+    
+    if not IS_WINDOWS:
+        return None
     if control is None:
         return None
     
@@ -272,13 +276,16 @@ def window_is_private(hwnd: int | None, process_name: str) -> bool:
     accessibility tree (two nodes deep for Chromium, shallow for Firefox), so later
     captures do not re-walk the page. On macOS the browser reports the front window's
     mode, which is ``incognito`` for Chromium and ``private`` for Firefox.
+    On Linux, always returns False (browser private mode detection not yet implemented).
     """
     if not _is_firefox(process_name) and _pattern_for(process_name) is None:
         return False
     if not _redaction_enabled():
         return False
-    from core.platform_support import IS_MACOS
+    from core.platform_support import IS_MACOS, IS_LINUX
 
+    if IS_LINUX:
+        return False
     if IS_MACOS:
         return _mac_front_is_private(process_name)
     if not hwnd:

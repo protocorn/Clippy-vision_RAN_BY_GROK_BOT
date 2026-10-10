@@ -16,7 +16,7 @@
 
 Clippy Vision watches your work on this computer, stores a searchable activity history locally, and lets you ask about it through a connected MCP client such as Cursor, Claude Desktop, or VS Code. The desktop app captures, summarizes, and shows the timeline.
 
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20(experimental)-blue)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Models](https://img.shields.io/badge/models-Ollama%20local-orange)
 ![MCP](https://img.shields.io/badge/MCP-Cursor%20%7C%20Claude%20Desktop%20%7C%20VS%20Code-purple)
@@ -57,10 +57,12 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 
 | | Minimum | Recommended |
 |--|---------|-------------|
-| OS | Windows 10 / 11 (64-bit) or macOS 12+ | Windows 11 or a current macOS |
+| OS | Windows 10 / 11 (64-bit), macOS 12+, or Linux (Ubuntu 22.04+, experimental) | Windows 11 or a current macOS |
 | System RAM | 8 GB | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
+
+**Linux support (experimental):** Capture runs with limited features. Screenshots work. Accessibility text (AT-SPI) and installers are not yet implemented. Requires `xdotool` for window metadata and `wl-paste` or `xclip` for clipboard.
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 

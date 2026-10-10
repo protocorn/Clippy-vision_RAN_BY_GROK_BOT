@@ -34,36 +34,24 @@ jobs:
       - name: List installed packages
         run: pip list
       
-      - name: Run tests with explicit skips
+      - name: Run tests with pytest markers
         run: |
-          # Skip tests that require:
-          # - GUI/display (Electron, X11, Wayland)
-          # - Ollama server running
-          # - Platform-specific APIs (uiautomation on Windows, pyobjc on macOS)
-          # - System integrations not available in CI
-          # - OS-specific path handling edge cases (Windows 8.3 names)
-          
-          # On Ubuntu: skip Windows-only tests (UI Automation)
-          # On Windows: skip macOS-only tests (AX APIs, AppleScript)
-          # On both: skip GUI, Ollama, system integration tests
+          # Tests are marked with platform-specific markers:
+          # - @pytest.mark.windows - Windows UI Automation tests
+          # - @pytest.mark.macos - macOS AX/AppleScript tests
+          # - @pytest.mark.linux - Linux-specific tests
+          # - @pytest.mark.requires_ollama - needs Ollama server
+          # - @pytest.mark.requires_gui - needs display/GUI
+          # - @pytest.mark.integration - full integration tests
           
           if [ "$RUNNER_OS" == "Windows" ]; then
-            # Skip tests that fail on Windows due to 8.3 short path names
-            pytest tests/ -v \
-              --ignore=tests/test_mcp_server.py \
-              --ignore=tests/test_accessibility_text.py \
-              --ignore=tests/test_editor_accessibility.py \
-              --ignore=tests/test_mac_redaction.py \
-              --ignore=tests/test_intro_builder.py \
+            # Run all tests except macOS-specific, GUI, Ollama, and integration
+            # Skip problematic path tests with 8.3 short names
+            pytest tests/ -v -m "not macos and not requires_gui and not requires_ollama and not integration" \
               -k "not test_infer_project_root_from_file and not test_resolve_screenshot_file_accepts_the_processed_name"
           else
-            # Ubuntu
-            pytest tests/ -v \
-              --ignore=tests/test_mcp_server.py \
-              --ignore=tests/test_accessibility_text.py \
-              --ignore=tests/test_editor_accessibility.py \
-              --ignore=tests/test_mac_redaction.py \
-              --ignore=tests/test_intro_builder.py
+            # Ubuntu: run all tests except Windows/macOS-specific, GUI, Ollama, and integration
+            pytest tests/ -v -m "not windows and not macos and not requires_gui and not requires_ollama and not integration"
           fi
         shell: bash
       
@@ -74,12 +62,14 @@ jobs:
           echo "- **OS**: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Python**: ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Explicitly Skipped Test Files" >> $GITHUB_STEP_SUMMARY
-          echo "- test_mcp_server.py - requires running Ollama server and MCP client" >> $GITHUB_STEP_SUMMARY
-          echo "- test_accessibility_text.py - requires Windows UI Automation or macOS AX APIs" >> $GITHUB_STEP_SUMMARY
-          echo "- test_editor_accessibility.py - requires running VS Code/Cursor with accessibility enabled" >> $GITHUB_STEP_SUMMARY
-          echo "- test_mac_redaction.py - requires macOS with AppleScript" >> $GITHUB_STEP_SUMMARY
-          echo "- test_intro_builder.py - requires full app setup and LLM" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Markers" >> $GITHUB_STEP_SUMMARY
+          echo "Tests are skipped based on pytest markers:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`@pytest.mark.windows\` - Windows UI Automation tests (skipped on Ubuntu)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`@pytest.mark.macos\` - macOS AX/AppleScript tests (skipped on both)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`@pytest.mark.linux\` - Linux-specific tests (run on Ubuntu)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`@pytest.mark.requires_ollama\` - needs Ollama server (skipped)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`@pytest.mark.requires_gui\` - needs display/GUI (skipped)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`@pytest.mark.integration\` - full integration tests (skipped)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "All other tests must pass for CI to succeed." >> $GITHUB_STEP_SUMMARY
+          echo "All non-skipped tests must pass for CI to succeed." >> $GITHUB_STEP_SUMMARY
         shell: bash

@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -37,6 +39,7 @@ def _launcher_path() -> Path:
     return root / "scripts" / "clippy-mcp"
 
 
+@pytest.mark.requires_ollama
 @unittest.skipIf(ClientSession is None, "mcp package is not installed")
 class McpServerSmokeTests(unittest.IsolatedAsyncioTestCase):
     """PowerShell: `$env:PYTHONPATH=(Get-Location).Path; python -m unittest tests.test_mcp_server`."""

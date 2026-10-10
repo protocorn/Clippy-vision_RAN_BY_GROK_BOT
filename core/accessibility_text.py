@@ -4,7 +4,7 @@ import heapq
 import re
 from collections import deque
 import threading
-from core.platform_support import IS_MACOS, IS_WINDOWS, _run_command
+from core.platform_support import IS_MACOS, IS_WINDOWS, IS_LINUX, _run_command
 
 
 MAX_TEXT_CHARS = 4000
@@ -758,12 +758,26 @@ def _mac_text() -> str:
     )
 
 
+_linux_at_spi_warned = False
+
+
+def _linux_text() -> str:
+    """Linux accessibility text extraction. Currently not implemented (AT-SPI support pending)."""
+    global _linux_at_spi_warned
+    if not _linux_at_spi_warned:
+        _linux_at_spi_warned = True
+        print("[accessibility_text] Linux AT-SPI support not yet implemented", file=sys.stderr)
+    return ""
+
+
 def extract_accessibility_text(hwnd: int | None = None) -> str:
     """Read bounded text from the foreground UI without taking a screenshot."""
     if IS_WINDOWS:
         return _windows_text(hwnd)
     if IS_MACOS:
         return _mac_text()
+    if IS_LINUX:
+        return _linux_text()
     return ""
 
 
