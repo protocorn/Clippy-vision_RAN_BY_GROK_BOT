@@ -28,39 +28,45 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov
+          pip install pytest
           pip install -r requirements.txt
-        continue-on-error: true
       
       - name: List installed packages
         run: pip list
       
-      - name: Run tests with markers
+      - name: Run tests with explicit skips
         run: |
-          pytest tests/ -v --tb=short \
-            -m "not gui and not requires_ollama and not requires_system_apis" \
-            --co -q || echo "Test collection completed"
-          pytest tests/ -v --tb=short \
-            -m "not gui and not requires_ollama and not requires_system_apis" \
-            || echo "Some tests failed or were skipped"
-        continue-on-error: true
-      
-      - name: Run all tests (allow failures)
-        run: pytest tests/ -v --tb=short || echo "Tests completed with some failures/skips"
-        continue-on-error: true
+          # Skip tests that require:
+          # - GUI/display (Electron, X11, Wayland)
+          # - Ollama server running
+          # - Platform-specific APIs (uiautomation on Windows, pyobjc on macOS)
+          # - System integrations not available in CI
+          
+          # On Ubuntu: skip Windows-only tests (UI Automation)
+          # On Windows: skip macOS-only tests (AX APIs, AppleScript)
+          # On both: skip GUI, Ollama, system integration tests
+          
+          pytest tests/ -v \
+            --deselect=tests/test_mcp_server.py \
+            --deselect=tests/test_accessibility_text.py \
+            --deselect=tests/test_editor_accessibility.py \
+            --deselect=tests/test_mac_redaction.py \
+            --deselect=tests/test_intro_builder.py
+        shell: bash
       
       - name: Test summary
         if: always()
         run: |
-          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
           echo "- **OS**: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Python**: ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Skipped/Failed Tests" >> $GITHUB_STEP_SUMMARY
-          echo "Tests requiring GUI, Ollama, or system-specific APIs (UI Automation, AX APIs) are skipped in CI." >> $GITHUB_STEP_SUMMARY
+          echo "### Explicitly Skipped Test Files" >> $GITHUB_STEP_SUMMARY
+          echo "- test_mcp_server.py - requires running Ollama server and MCP client" >> $GITHUB_STEP_SUMMARY
+          echo "- test_accessibility_text.py - requires Windows UI Automation or macOS AX APIs" >> $GITHUB_STEP_SUMMARY
+          echo "- test_editor_accessibility.py - requires running VS Code/Cursor with accessibility enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- test_mac_redaction.py - requires macOS with AppleScript" >> $GITHUB_STEP_SUMMARY
+          echo "- test_intro_builder.py - requires full app setup and LLM" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Categories skipped:**" >> $GITHUB_STEP_SUMMARY
-          echo "- GUI tests (require Electron, display)" >> $GITHUB_STEP_SUMMARY
-          echo "- Ollama tests (require running Ollama server)" >> $GITHUB_STEP_SUMMARY
-          echo "- System API tests (Windows UI Automation, macOS AX APIs)" >> $GITHUB_STEP_SUMMARY
+          echo "All other tests must pass for CI to succeed." >> $GITHUB_STEP_SUMMARY
         shell: bash
