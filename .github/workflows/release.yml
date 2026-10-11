@@ -373,7 +373,7 @@ jobs:
         run: |
           echo "Installing Xvfb, FUSE, and screenshot tools..."
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl
+          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl lsof
           
           APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
           chmod +x "$APPIMAGE"
@@ -394,6 +394,7 @@ jobs:
           
           # Monitor for 90 seconds, checking for backend and window
           BACKEND_FOUND=false
+          BACKEND_PORT=""
           WINDOW_FOUND=false
           
           for i in {1..90}; do
@@ -406,21 +407,16 @@ jobs:
               exit 1
             fi
             
-            # Check for Python backend process
+            # Check log for backend port announcement
             if [ "$BACKEND_FOUND" = false ]; then
-              if pgrep -f "python.*api_server" > /dev/null 2>&1; then
-                BACKEND_FOUND=true
-                echo "✓ Python backend process detected at ${i}s"
-              fi
-            fi
-            
-            # Check for backend port listening (try common ports)
-            if [ "$BACKEND_FOUND" = true ]; then
-              if grep -q "CLIPPY_API_PORT" "$LOG_FILE" 2>/dev/null; then
-                API_PORT=$(grep -o "CLIPPY_API_PORT.*" "$LOG_FILE" | head -1 | grep -o "[0-9]\+" | head -1)
-                if [ -n "$API_PORT" ]; then
-                  if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$API_PORT/health" 2>/dev/null | grep -q "200"; then
-                    echo "✓ Backend health endpoint responding on port $API_PORT at ${i}s"
+              PORT_LINE=$(grep -o "\[api\] port=[0-9]*" "$LOG_FILE" 2>/dev/null | head -1)
+              if [ -n "$PORT_LINE" ]; then
+                BACKEND_PORT=$(echo "$PORT_LINE" | grep -o "[0-9]\+")
+                if [ -n "$BACKEND_PORT" ]; then
+                  # Verify port is actually listening
+                  if ss -ln | grep ":$BACKEND_PORT " > /dev/null 2>&1; then
+                    BACKEND_FOUND=true
+                    echo "✓ Backend listening on port $BACKEND_PORT at ${i}s"
                   fi
                 fi
               fi
@@ -459,9 +455,11 @@ jobs:
           
           # Verify required components started
           if [ "$BACKEND_FOUND" = false ]; then
-            echo "ERROR: Python backend process never detected"
+            echo "ERROR: Backend port never detected or not listening"
             echo "=== Application log ==="
             cat "$LOG_FILE"
+            echo "=== Listening ports ==="
+            ss -ln | grep LISTEN
             kill $APP_PID 2>/dev/null || true
             kill $XVFB_PID 2>/dev/null || true
             exit 1
@@ -495,7 +493,7 @@ jobs:
           
           echo ""
           echo "✓ Launch test completed successfully"
-          echo "  - Backend process verified"
+          echo "  - Backend listening on port $BACKEND_PORT"
           echo "  - Electron window verified"
           echo "  - Stable for 120 seconds"
 
