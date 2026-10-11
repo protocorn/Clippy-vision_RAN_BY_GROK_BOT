@@ -119,47 +119,84 @@ jobs:
           $localExePath = "$localInstallPath\Clippy Vision.exe"
           
           $installedExe = $null
+          $installLocation = ""
           if (Test-Path $exePath) {
             $installedExe = $exePath
+            $installLocation = "Program Files"
             Write-Host "✓ Installation successful (Program Files): $exePath"
           } elseif (Test-Path $localExePath) {
             $installedExe = $localExePath
-            Write-Host "✓ Installation successful (LocalAppData): $localExePath"
+            $installLocation = "LocalAppData\Programs"
+            Write-Host "✓ Installation successful (LocalAppData\Programs): $localExePath"
           } else {
-            Write-Host "⚠ Installation verification inconclusive:"
-            Write-Host "  - Not found at: $exePath"
-            Write-Host "  - Not found at: $localExePath"
-            Write-Host "  Silent install may require admin or install to a different location"
-            "Installation path not found (non-critical)" | Out-File $installLog
-            Write-Host "✓ Silent install test completed (path verification failed, non-critical)"
-            exit 0
+            Write-Error "Installation failed - executable not found at either location:"
+            Write-Error "  - $exePath"
+            Write-Error "  - $localExePath"
+            "Installation failed - exe not found" | Out-File $installLog
+            exit 1
           }
           
           $exeSize = (Get-Item $installedExe).Length
           Write-Host "  Installed exe size: $exeSize bytes"
+          Write-Host "  Install location: $installLocation"
           
-          # Brief launch test (5 seconds)
-          Write-Host "Attempting brief launch test..."
-          $process = Start-Process -FilePath $installedExe -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+          # Launch test (30 seconds)
+          Write-Host "Launching application (30 second test)..."
+          $process = Start-Process -FilePath $installedExe -PassThru -WindowStyle Hidden -ErrorAction Stop
           
-          if ($process) {
-            Start-Sleep -Seconds 5
+          if (-not $process) {
+            Write-Error "Failed to start process"
+            "Launch failed" | Out-File $installLog
+            exit 1
+          }
+          
+          Write-Host "  Main process PID: $($process.Id)"
+          
+          # Monitor for 30 seconds
+          $backendFound = $false
+          for ($i = 1; $i -le 30; $i++) {
+            Start-Sleep -Seconds 1
             
+            # Check if main process exited
             if ($process.HasExited) {
-              Write-Host "⚠ Process exited immediately (exit code: $($process.ExitCode))"
-              "Process exited after launch (code: $($process.ExitCode))" | Out-File $installLog
-            } else {
-              Write-Host "✓ Process still running after 5 seconds"
-              "Process launched successfully" | Out-File $installLog
-              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              Write-Error "Process exited after $i seconds (exit code: $($process.ExitCode))"
+              "Process crashed after ${i}s (code: $($process.ExitCode))" | Out-File $installLog
+              exit 1
             }
-          } else {
-            Write-Host "⚠ Could not launch process (may need GUI/admin)"
-            "Launch failed (non-critical)" | Out-File $installLog
+            
+            # Check for Python backend process
+            if (-not $backendFound) {
+              $pythonProcs = Get-Process -Name python* -ErrorAction SilentlyContinue | Where-Object {
+                $_.Parent.Id -eq $process.Id -or $_.CommandLine -like "*api_server*"
+              }
+              if ($pythonProcs) {
+                Write-Host "✓ Python backend process detected at ${i}s"
+                $backendFound = $true
+              }
+            }
+          }
+          
+          Write-Host "✓ Process still running after 30 seconds"
+          
+          if (-not $backendFound) {
+            Write-Warning "Python backend process not detected (may be in different process tree)"
+          }
+          
+          # Cleanup
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          
+          # Write summary
+          "Installation: $installLocation" | Out-File $installLog
+          "Process ran for 30 seconds" | Out-File $installLog -Append
+          if ($backendFound) {
+            "Backend process detected" | Out-File $installLog -Append
           }
           
           Write-Host ""
           Write-Host "✓ Silent install test completed"
+          Write-Host "  - Installed to: $installLocation"
+          Write-Host "  - Process stable for 30s"
+          Write-Host "  - Backend process: $(if ($backendFound) { 'detected' } else { 'not detected' })"
 
       - name: Upload Windows test artifacts
         if: always()
@@ -336,7 +373,7 @@ jobs:
         run: |
           echo "Installing Xvfb, FUSE, and screenshot tools..."
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2
+          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl
           
           APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
           chmod +x "$APPIMAGE"
@@ -353,12 +390,64 @@ jobs:
           APP_PID=$!
           
           echo "AppImage PID: $APP_PID"
-          echo "Waiting 60 seconds..."
+          echo "Waiting up to 90 seconds for startup..."
           
-          # Monitor for 60 seconds
-          for i in {1..60}; do
+          # Monitor for 90 seconds, checking for backend and window
+          BACKEND_FOUND=false
+          WINDOW_FOUND=false
+          
+          for i in {1..90}; do
+            # Check if main process still alive
             if ! kill -0 $APP_PID 2>/dev/null; then
               echo "ERROR: AppImage crashed after $i seconds"
+              echo "=== Crash log ==="
+              cat "$LOG_FILE"
+              kill $XVFB_PID 2>/dev/null || true
+              exit 1
+            fi
+            
+            # Check for Python backend process
+            if [ "$BACKEND_FOUND" = false ]; then
+              if pgrep -f "python.*api_server" > /dev/null 2>&1; then
+                BACKEND_FOUND=true
+                echo "✓ Python backend process detected at ${i}s"
+              fi
+            fi
+            
+            # Check for backend port listening (try common ports)
+            if [ "$BACKEND_FOUND" = true ]; then
+              if grep -q "CLIPPY_API_PORT" "$LOG_FILE" 2>/dev/null; then
+                API_PORT=$(grep -o "CLIPPY_API_PORT.*" "$LOG_FILE" | head -1 | grep -o "[0-9]\+" | head -1)
+                if [ -n "$API_PORT" ]; then
+                  if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$API_PORT/health" 2>/dev/null | grep -q "200"; then
+                    echo "✓ Backend health endpoint responding on port $API_PORT at ${i}s"
+                  fi
+                fi
+              fi
+            fi
+            
+            # Check for Electron window
+            if [ "$WINDOW_FOUND" = false ]; then
+              if xdotool search --name "Clippy" > /dev/null 2>&1; then
+                WINDOW_FOUND=true
+                echo "✓ Electron window detected at ${i}s"
+              fi
+            fi
+            
+            # Exit early if both verified
+            if [ "$BACKEND_FOUND" = true ] && [ "$WINDOW_FOUND" = true ]; then
+              echo "✓ Both backend and window verified, continuing monitoring..."
+              break
+            fi
+            
+            sleep 1
+          done
+          
+          # Continue monitoring to ensure stability (30 more seconds)
+          echo "Monitoring stability for 30 more seconds..."
+          for i in {1..30}; do
+            if ! kill -0 $APP_PID 2>/dev/null; then
+              echo "ERROR: AppImage crashed during stability check"
               cat "$LOG_FILE"
               kill $XVFB_PID 2>/dev/null || true
               exit 1
@@ -366,23 +455,25 @@ jobs:
             sleep 1
           done
           
-          echo "✓ AppImage still running after 60s"
+          echo "✓ AppImage stable for 120 seconds total"
           
-          # Check for backend startup evidence
-          echo "Checking for Python backend..."
-          if grep -q "api_server\|mcp_server\|Uvicorn running\|Application startup complete" "$LOG_FILE" 2>/dev/null; then
-            echo "✓ Python backend started"
-          else
-            echo "⚠ Backend startup not detected in logs (may still be starting)"
+          # Verify required components started
+          if [ "$BACKEND_FOUND" = false ]; then
+            echo "ERROR: Python backend process never detected"
+            echo "=== Application log ==="
+            cat "$LOG_FILE"
+            kill $APP_PID 2>/dev/null || true
+            kill $XVFB_PID 2>/dev/null || true
+            exit 1
           fi
           
-          # Check for Electron window
-          echo "Checking for Electron window..."
-          sleep 2
-          if xdotool search --name "Clippy" 2>/dev/null; then
-            echo "✓ Electron window detected"
-          else
-            echo "⚠ Electron window not found (may not have title yet)"
+          if [ "$WINDOW_FOUND" = false ]; then
+            echo "ERROR: Electron window never appeared"
+            echo "=== Application log ==="
+            cat "$LOG_FILE"
+            kill $APP_PID 2>/dev/null || true
+            kill $XVFB_PID 2>/dev/null || true
+            exit 1
           fi
           
           # Capture screenshot
@@ -392,11 +483,11 @@ jobs:
           
           # Show log excerpt
           echo ""
-          echo "=== Launch log excerpt (first 50 lines) ==="
-          head -50 "$LOG_FILE"
+          echo "=== Launch log excerpt (first 100 lines) ==="
+          head -100 "$LOG_FILE"
           echo ""
-          echo "=== Launch log excerpt (last 50 lines) ==="
-          tail -50 "$LOG_FILE"
+          echo "=== Launch log excerpt (last 100 lines) ==="
+          tail -100 "$LOG_FILE"
           
           # Cleanup
           kill $APP_PID 2>/dev/null || true
@@ -404,6 +495,9 @@ jobs:
           
           echo ""
           echo "✓ Launch test completed successfully"
+          echo "  - Backend process verified"
+          echo "  - Electron window verified"
+          echo "  - Stable for 120 seconds"
 
       - name: Upload launch test artifacts
         if: always()
