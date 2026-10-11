@@ -312,6 +312,19 @@ def on_paste_event(paste_event: PasteEvent):
     global _last_paste_time
     if not get_capture_settings()["capture_clipboard"]:
         return
+    
+    # Check if the foreground window has opted out of capture
+    from core.capture_optout import should_skip_capture
+    from core.platform_support import get_foreground_window_bounds
+    
+    window_context = _safe_window_metadata(paste_event.get("window_context"))
+    process_name = window_context.get("process_name", "")
+    hwnd_check = _foreground_hwnd()
+    bounds_check = get_foreground_window_bounds() if IS_MACOS else None
+    
+    if should_skip_capture(hwnd_check, process_name, bounds_check):
+        return
+    
     _last_paste_time = time.time()
     window_context = _safe_window_metadata(paste_event.get("window_context"))
     content = get_clipboard_text()
@@ -351,6 +364,21 @@ def clipboard_monitor():
             last_content = None
             was_enabled = False
             continue
+        
+        # Check if the foreground window has opted out of capture
+        from core.capture_optout import should_skip_capture
+        from core.platform_support import get_foreground_window_bounds
+        
+        metadata = _safe_window_metadata(get_window_metadata())
+        process_name = metadata.get("process_name", "")
+        hwnd_check = _foreground_hwnd()
+        bounds_check = get_foreground_window_bounds() if IS_MACOS else None
+        
+        if should_skip_capture(hwnd_check, process_name, bounds_check):
+            # Don't capture clipboard when window has opted out
+            last_content = None
+            continue
+        
         current = get_clipboard_text()
         if not was_enabled:
             last_content = current

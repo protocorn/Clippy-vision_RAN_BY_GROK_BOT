@@ -50,6 +50,12 @@ Before text or a screenshot is stored, Clippy tries to:
 - Paint password fields and other single-line sensitive fields.
 - Strip API keys, tokens, private keys, and other secret-shaped text.
 - Black out Clippy's own window in every screenshot.
+- **Honor OS-level capture opt-out signals**: Applications that request not to be captured via operating system APIs (such as password managers, banking apps, and DRM software) are automatically excluded. When such a window is in the foreground, Clippy skips screenshots, OCR, accessibility text, and clipboard capture for that moment, recording only a minimal event marker with no content.
+
+**OS-level opt-out mechanisms honored:**
+- **Windows**: `SetWindowDisplayAffinity` with `WDA_EXCLUDEFROMCAPTURE` or `WDA_MONITOR` flags (used by 1Password, Bitwarden, banking apps, and some DRM applications)
+- **macOS**: `NSWindowSharingNone` (`kCGWindowSharingState == 0`) exposed via CGWindowList (used by password managers and secure apps)
+- **Linux**: No standardized OS mechanism currently available. Clippy falls back to process-name checking for known password managers and sensitive applications.
 
 The same redactor runs again on every MCP tool reply. Screenshot file paths are left out. A window you marked private is returned as "This moment was private" with the app and time only. If that filter fails, the tool returns nothing. The copy on this computer is unchanged.
 

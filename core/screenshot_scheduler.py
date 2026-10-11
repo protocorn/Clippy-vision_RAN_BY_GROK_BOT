@@ -322,6 +322,14 @@ def _foreground_accessibility_text() -> str:
 
     if window_is_private(_foreground_hwnd(), process_name):
         return ""
+    
+    # Check if the foreground window has opted out of capture
+    from core.capture_optout import should_skip_capture
+    
+    hwnd_check = _foreground_hwnd()
+    bounds_check = get_foreground_window_bounds() if IS_MACOS else None
+    if should_skip_capture(hwnd_check, process_name, bounds_check):
+        return ""
     captured_text = extract_accessibility_text()
     current = get_window_metadata()
     if not current:
@@ -712,6 +720,16 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
     process_name = (foreground or {}).get("process_name") or ""
     if process_name and not should_watch_process(process_name):
         return None
+    
+    # Check if the foreground window has opted out of capture via OS-level signals
+    from core.capture_optout import should_skip_capture
+    
+    hwnd_check = _foreground_hwnd()
+    bounds_check = get_foreground_window_bounds() if IS_MACOS else None
+    if should_skip_capture(hwnd_check, process_name, bounds_check):
+        increment("screenshots.opted_out")
+        return None
+    
     # Cursor and VS Code hide the open file until this setting is on.
     from core.editor_accessibility import ensure_screen_reader_support
 
