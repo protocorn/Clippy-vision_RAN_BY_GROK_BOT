@@ -442,36 +442,52 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         for (let i = 0; i < needed.length; i++) {
             const model = needed[i]
             stepUpdate('models', 'running', `Downloading ${model.label}...`)
-            log(`> ollama pull ${model.name}`, 'dim')
+            log(`> python -m core.ollama_pull ${model.name}`, 'dim')
             stepProgress('models', -1)
 
             await new Promise((resolve, reject) => {
-                const proc = spawnHidden(OLLAMA_COMMAND, ['pull', model.name], { cwd: ROOT })
+                const proc = spawnHidden(PYTHON_COMMAND, ['-m', 'core.ollama_pull', model.name], { cwd: ROOT })
+                let lastError = null
 
                 proc.stdout.on('data', (chunk) => {
                     const lines = chunk.toString().split('\n').filter(l => l.trim())
                     for (const line of lines) {
-                        log(line, 'dim')
-
-                        // Ollama emits human-readable GB or MB progress lines; the
-                        // two parsers keep the progress bar useful for both sizes.
-                        const match = line.match(/(\d+(?:\.\d+)?)\s*GB\s*\/\s*(\d+(?:\.\d+)?)\s*GB/)
-                        if (match) {
-                            const pct = Math.round((parseFloat(match[1]) / parseFloat(match[2])) * 100)
-                            stepProgress('models', pct)
-                            stepUpdate('models', 'running', `${model.label}: ${pct}%`)
-                        }
-
-                        const matchMB = line.match(/(\d+(?:\.\d+)?)\s*MB\s*\/\s*(\d+(?:\.\d+)?)\s*MB/)
-                        if (matchMB) {
-                            const pct = Math.round((parseFloat(matchMB[1]) / parseFloat(matchMB[2])) * 100)
-                            stepProgress('models', pct)
+                        try {
+                            const progress = JSON.parse(line)
+                            
+                            // Check for errors
+                            if (progress.error) {
+                                lastError = progress.error
+                                log(`Error: ${progress.error}`, 'err')
+                                continue
+                            }
+                            
+                            // Update progress bar
+                            if (progress.percent !== undefined) {
+                                stepProgress('models', Math.round(progress.percent))
+                            }
+                            
+                            // Update status text with MB progress
+                            if (progress.downloaded_mb !== undefined && progress.total_mb > 0) {
+                                const downloadedMB = Math.round(progress.downloaded_mb)
+                                const totalMB = Math.round(progress.total_mb)
+                                const pct = Math.round(progress.percent)
+                                stepUpdate('models', 'running', `${model.label}: ${pct}% (${downloadedMB} / ${totalMB} MB)`)
+                            } else {
+                                stepUpdate('models', 'running', `${model.label}: ${progress.status}`)
+                            }
+                            
+                            // Log the status
+                            log(`${progress.status} - ${Math.round(progress.downloaded_mb)} / ${Math.round(progress.total_mb)} MB`, 'dim')
+                        } catch (e) {
+                            // Not JSON, just log it
+                            log(line, 'dim')
                         }
                     }
                 })
 
                 proc.stderr.on('data', (chunk) => {
-                    chunk.toString().split('\n').filter(l => l.trim()).forEach(l => log(l, 'dim'))
+                    chunk.toString().split('\n').filter(l => l.trim()).forEach(l => log(l, 'err'))
                 })
 
                 proc.on('exit', (code) => {
@@ -479,7 +495,8 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                         log(`${model.name} ready.`, 'ok')
                         resolve()
                     } else {
-                        reject(new Error(`ollama pull ${model.name} failed`))
+                        const errorMsg = lastError || `Model pull failed with exit code ${code}`
+                        reject(new Error(errorMsg))
                     }
                 })
 
