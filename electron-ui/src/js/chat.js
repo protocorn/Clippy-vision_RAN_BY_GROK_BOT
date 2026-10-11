@@ -26,22 +26,38 @@ export function parseAssistantContent(raw) {
 export function renderMarkdown(text) {
   const source = text || ''
   if (!source) return ''
+  
+  // Escape text for safe fallback
+  const escapeHtml = (str) => str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+  
   try {
     const parse = markedApi?.parse || markedApi?.marked
-    const html = typeof parse === 'function' ? parse(source) : source
-    if (window.DOMPurify?.sanitize) {
-      return window.DOMPurify.sanitize(html, {
-        USE_PROFILES: { html: true },
-        ADD_ATTR: ['target', 'rel'],
-      })
+    if (typeof parse !== 'function') {
+      return `<p>${escapeHtml(source)}</p>`
     }
-    return html
-  } catch (_) {
-    const escaped = source
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    return `<p>${escaped}</p>`
+    
+    const html = parse(source)
+    
+    // SECURITY: Must sanitize with DOMPurify. Never return raw HTML.
+    if (!window.DOMPurify?.sanitize) {
+      console.warn('[chat] DOMPurify not loaded, falling back to escaped text')
+      return `<p>${escapeHtml(source)}</p>`
+    }
+    
+    return window.DOMPurify.sanitize(html, {
+      USE_PROFILES: { html: true },
+      ADD_ATTR: ['target', 'rel'],
+      FORBID_TAGS: ['script', 'iframe', 'object', 'embed'],
+      FORBID_ATTR: ['onerror', 'onload', 'onclick'],
+    })
+  } catch (err) {
+    console.error('[chat] renderMarkdown error:', err)
+    return `<p>${escapeHtml(source)}</p>`
   }
 }
 
@@ -49,12 +65,20 @@ export function setMessageMarkdown(el, text) {
   const html = renderMarkdown(text)
   el.classList.add('md')
   el.innerHTML = html
+  
+  // SECURITY: Strip javascript: URLs and other non-http(s) protocols
   el.querySelectorAll('a[href]').forEach((a) => {
     const href = a.getAttribute('href') || ''
     if (/^https?:\/\//i.test(href)) {
       a.setAttribute('target', '_blank')
       a.setAttribute('rel', 'noopener noreferrer')
+    } else if (/^javascript:/i.test(href) || href.includes(':')) {
+      // Remove dangerous or non-standard protocols
+      a.removeAttribute('href')
+      a.style.cursor = 'text'
+      a.style.textDecoration = 'none'
     } else {
+      // Relative or fragment links - remove for safety in Electron
       a.removeAttribute('href')
     }
   })

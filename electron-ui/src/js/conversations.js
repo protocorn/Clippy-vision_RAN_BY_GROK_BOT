@@ -153,10 +153,19 @@ export function renderGroupedConversations(items) {
  const label = document.createElement('button')
  label.type = 'button'
  label.className = 'conv-section-label'
- label.innerHTML =
- `<span class="conv-section-chevron">▾</span>` +
- `<span>${group.label}</span>` +
- `<span class="conv-section-count">${group.items.length}</span>`
+ 
+ const chevron = document.createElement('span')
+ chevron.className = 'conv-section-chevron'
+ chevron.textContent = '▾'
+ const labelText = document.createElement('span')
+ labelText.textContent = group.label
+ const count = document.createElement('span')
+ count.className = 'conv-section-count'
+ count.textContent = String(group.items.length)
+ 
+ label.appendChild(chevron)
+ label.appendChild(labelText)
+ label.appendChild(count)
  label.addEventListener('click', () => {
  section.classList.toggle('collapsed')
  })
@@ -176,7 +185,10 @@ export function renderGroupedConversations(items) {
 export function renderSearchResults(items, query) {
  convList.innerHTML = ''
  if (!items.length) {
- convList.innerHTML = `<div class="conv-empty">No chats match "${query}"div>`
+ const emptyDiv = document.createElement('div')
+ emptyDiv.className = 'conv-empty'
+ emptyDiv.textContent = `No chats match "${query}"`
+ convList.appendChild(emptyDiv)
  return
  }
 
@@ -186,9 +198,14 @@ export function renderSearchResults(items, query) {
  const label = document.createElement('div')
  label.className = 'conv-section-label'
  label.style.cursor = 'default'
- label.innerHTML =
- `<span>Best matches</span>` +
- `<span class="conv-section-count">${items.length}</span>`
+ 
+ const matchesSpan = document.createElement('span')
+ matchesSpan.textContent = 'Best matches'
+ const countSpan = document.createElement('span')
+ countSpan.className = 'conv-section-count'
+ countSpan.textContent = String(items.length)
+ label.appendChild(matchesSpan)
+ label.appendChild(countSpan)
  section.appendChild(label)
 
  const itemsWrap = document.createElement('div')
@@ -216,7 +233,11 @@ export async function refreshConversationList() {
  renderGroupedConversations(items)
  } catch (error) {
  if (seq !== store.searchSeq) return
- convList.innerHTML = `<div class="conv-empty">Failed to load: ${error.message}</div>`
+ const errorDiv = document.createElement('div')
+ errorDiv.className = 'conv-empty'
+ errorDiv.textContent = `Failed to load: ${error.message || 'unknown error'}`
+ convList.innerHTML = ''
+ convList.appendChild(errorDiv)
  }
  return
  }
@@ -230,7 +251,11 @@ export async function refreshConversationList() {
  } catch (error) {
  if (seq !== store.searchSeq) return
  convSearchHint.textContent = ''
- convList.innerHTML = `<div class="conv-empty">Search failed: ${error.message}</div>`
+ const errorDiv = document.createElement('div')
+ errorDiv.className = 'conv-empty'
+ errorDiv.textContent = `Search failed: ${error.message || 'unknown error'}`
+ convList.innerHTML = ''
+ convList.appendChild(errorDiv)
  }
 }
 
