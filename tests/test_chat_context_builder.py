@@ -268,3 +268,87 @@ def test_format_context_truncates_long_text():
     for line in lines:
         # No single line should be absurdly long (allowing for some overhead)
         assert len(line) < 600, f"Line too long: {len(line)} chars"
+
+
+def test_load_conversation_history():
+    """Test that conversation history is loaded correctly."""
+    from core.chat_context import load_conversation_history
+    
+    with patch("core.storage.conn") as mock_conn:
+        # Simulate database returning history (newest first from DB)
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("assistant", "Previous answer"),
+            ("user", "Previous question")
+        ]
+        
+        history = load_conversation_history("test123", max_turns=10, max_chars=4000)
+        
+        # Should be reversed to oldest first
+        assert len(history) == 2
+        assert history[0] == {"role": "user", "content": "Previous question"}
+        assert history[1] == {"role": "assistant", "content": "Previous answer"}
+
+
+def test_load_conversation_history_respects_char_limit():
+    """Test that conversation history stops at character budget."""
+    from core.chat_context import load_conversation_history
+    
+    with patch("core.storage.conn") as mock_conn:
+        # Return messages where the 3rd would exceed limit
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("assistant", "x" * 1500),  # Would push total over 2000
+            ("user", "y" * 500),
+            ("assistant", "Short A1"),
+            ("user", "Short Q1")
+        ]
+        
+        history = load_conversation_history("test123", max_turns=10, max_chars=2000)
+        
+        # First 2 messages fit (~1000 chars), 3rd would exceed, so only 2 are included
+        # (actually 4 messages fit because last 2 are short, but reversed order matters)
+        total_chars = sum(len(m["content"]) for m in history)
+        assert total_chars <= 2000
+        assert len(history) >= 2  # At least 2 short ones should fit
+
+
+def test_build_chat_messages_includes_system_and_user():
+    """Test that build_chat_messages creates proper message structure."""
+    from core.chat_context import build_chat_messages
+    
+    with patch("core.chat_context.build_recent_context") as mock_context, \
+         patch("core.chat_context.load_conversation_history") as mock_history:
+        
+        mock_context.return_value = {"sessions": [], "events": [], "lookback_minutes": 60, "retrieved_at": "now"}
+        mock_history.return_value = []
+        
+        messages = build_chat_messages("Test question")
+        
+        # Should have system + user
+        assert len(messages) >= 2
+        assert messages[0]["role"] == "system"
+        assert "Clippy Vision" in messages[0]["content"]
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"] == "Test question"
+
+
+def test_build_chat_messages_includes_history():
+    """Test that build_chat_messages includes conversation history."""
+    from core.chat_context import build_chat_messages
+    
+    with patch("core.chat_context.build_recent_context") as mock_context, \
+         patch("core.chat_context.load_conversation_history") as mock_history:
+        
+        mock_context.return_value = {"sessions": [], "events": [], "lookback_minutes": 60, "retrieved_at": "now"}
+        mock_history.return_value = [
+            {"role": "user", "content": "Previous Q"},
+            {"role": "assistant", "content": "Previous A"}
+        ]
+        
+        messages = build_chat_messages("New question", "conv123")
+        
+        # Should have system + history + new user
+        assert len(messages) == 4
+        assert messages[0]["role"] == "system"
+        assert messages[1] == {"role": "user", "content": "Previous Q"}
+        assert messages[2] == {"role": "assistant", "content": "Previous A"}
+        assert messages[3] == {"role": "user", "content": "New question"}

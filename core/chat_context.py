@@ -151,3 +151,80 @@ def format_context_for_prompt(context: dict[str, Any]) -> str:
         return "No recent activity found."
     
     return "\n".join(lines)
+
+
+def load_conversation_history(conversation_id: str, max_turns: int = 10, max_chars: int = 4000) -> list[dict[str, str]]:
+    """Load recent conversation history for multi-turn context.
+    
+    Args:
+        conversation_id: Conversation to load history for
+        max_turns: Maximum number of turns (user+assistant pairs) to include
+        max_chars: Maximum total characters across all messages
+    
+    Returns:
+        List of message dicts with 'role' and 'content' keys, oldest first
+    """
+    from core.storage import conn
+    
+    try:
+        rows = conn.execute(
+            """SELECT role, content FROM conversations 
+               WHERE conversation_id = ? 
+               ORDER BY timestamp DESC 
+               LIMIT ?""",
+            (conversation_id, max_turns * 2)
+        ).fetchall()
+        
+        # Reverse to get oldest first
+        messages = []
+        total_chars = 0
+        for row in reversed(rows):
+            role = row[0]
+            content = row[1] or ""
+            
+            # Stop if we exceed character budget
+            if total_chars + len(content) > max_chars:
+                break
+            
+            messages.append({"role": role, "content": content})
+            total_chars += len(content)
+        
+        return messages
+    except Exception as e:
+        print(f"[chat_context] conversation history retrieval failed: {e}")
+        return []
+
+
+def build_chat_messages(user_message: str, conversation_id: str | None = None) -> list[dict[str, str]]:
+    """Build complete message list for chat API including context and history.
+    
+    Args:
+        user_message: The new user message
+        conversation_id: Optional conversation ID for multi-turn history
+    
+    Returns:
+        List of message dicts ready for Ollama API
+    """
+    # Build activity context
+    context = build_recent_context(lookback_minutes=60, max_sessions=5, max_events=10)
+    context_text = format_context_for_prompt(context)
+    
+    # System prompt with context
+    system_message = (
+        "You are Clippy Vision's assistant. You have access to the user's recent "
+        "captured activity (screen text, window titles, apps used, and summaries). "
+        "Answer questions about their activity concisely and helpfully.\n\n"
+        f"{context_text}"
+    )
+    
+    messages = [{"role": "system", "content": system_message}]
+    
+    # Add conversation history if available
+    if conversation_id:
+        history = load_conversation_history(conversation_id, max_turns=10, max_chars=4000)
+        messages.extend(history)
+    
+    # Add new user message
+    messages.append({"role": "user", "content": user_message})
+    
+    return messages

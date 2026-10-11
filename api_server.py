@@ -212,32 +212,19 @@ def _validate_user_message(message: str) -> str:
 @app.post("/chat")
 def chat(req: QueryRequest):
     """Non-streaming chat endpoint. Returns complete response."""
+    import uuid
     from agent.conversation import save_chat
-    from core.chat_context import build_recent_context, format_context_for_prompt
+    from core.chat_context import build_chat_messages
     from core.chat_model import get_chat_model
     from core.llm_gateway import Priority, gateway
     from core.ollama_client import OllamaUnavailable
     
     message = _validate_user_message(req.message)
-    conversation_id = (req.conversation_id or "").strip() or str(time.time())
+    conversation_id = (req.conversation_id or "").strip() or str(uuid.uuid4())
     
     try:
-        # Build context from recent activity
-        context = build_recent_context(lookback_minutes=60, max_sessions=5, max_events=10)
-        context_text = format_context_for_prompt(context)
-        
-        # Build messages for Ollama
-        system_message = (
-            "You are Clippy Vision's assistant. You have access to the user's recent "
-            "captured activity (screen text, window titles, apps used, and summaries). "
-            "Answer questions about their activity concisely and helpfully.\n\n"
-            f"{context_text}"
-        )
-        
-        messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": message}
-        ]
+        # Build messages with context and conversation history
+        messages = build_chat_messages(message, conversation_id)
         
         # Call Ollama
         model = get_chat_model()
@@ -258,11 +245,13 @@ def chat(req: QueryRequest):
             "chat_disabled": False
         }
     
-    except OllamaUnavailable as e:
+    except OllamaUnavailable:
         raise HTTPException(
             status_code=503,
             detail="Ollama is not running. Please start Ollama and try again."
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[chat] error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -271,36 +260,23 @@ def chat(req: QueryRequest):
 @app.post("/chat/stream")
 def chat_stream(req: QueryRequest):
     """Streaming chat endpoint. Returns SSE stream."""
+    import uuid
     from agent.conversation import save_chat
-    from core.chat_context import build_recent_context, format_context_for_prompt
+    from core.chat_context import build_chat_messages
     from core.chat_model import get_chat_model
     from core.llm_gateway import Priority, gateway
     from core.ollama_client import OllamaUnavailable
     
     message = _validate_user_message(req.message)
-    conversation_id = (req.conversation_id or "").strip() or str(time.time())
+    conversation_id = (req.conversation_id or "").strip() or str(uuid.uuid4())
 
     def event_gen():
         accumulated = []
         try:
-            # Build context from recent activity
+            # Build messages with context and conversation history
             yield f"data: {json.dumps({'type': 'status', 'text': 'Retrieving context...'}, ensure_ascii=False)}\n\n"
             
-            context = build_recent_context(lookback_minutes=60, max_sessions=5, max_events=10)
-            context_text = format_context_for_prompt(context)
-            
-            # Build messages for Ollama
-            system_message = (
-                "You are Clippy Vision's assistant. You have access to the user's recent "
-                "captured activity (screen text, window titles, apps used, and summaries). "
-                "Answer questions about their activity concisely and helpfully.\n\n"
-                f"{context_text}"
-            )
-            
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": message}
-            ]
+            messages = build_chat_messages(message, conversation_id)
             
             yield f"data: {json.dumps({'type': 'status', 'text': 'Generating response...'}, ensure_ascii=False)}\n\n"
             
@@ -324,7 +300,7 @@ def chat_stream(req: QueryRequest):
             
             yield f"data: {json.dumps({'type': 'done', 'result': assistant_message, 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
         
-        except OllamaUnavailable as e:
+        except OllamaUnavailable:
             error_msg = "Ollama is not running. Please start Ollama and try again."
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'ollama_unavailable': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
