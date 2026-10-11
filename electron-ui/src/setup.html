@@ -768,7 +768,7 @@
             </tr>
             <tr>
               <th>OS</th>
-              <td colspan="2" data-label="Requirement" id="os-requirement">Windows 10/11 or macOS</td>
+              <td colspan="2" data-label="Requirement" id="os-requirement">Windows 10/11, macOS, or Linux</td>
               <td class="col-yours" data-label="Your PC" id="you-os">—</td>
               <td data-label="Status"><span class="pill ok" id="pill-os"><span class="dot"></span><span>OK</span></span></td>
             </tr>
@@ -1003,9 +1003,12 @@
 
       $('you-os').textContent = check.yours.osLabel
       setPill($('pill-os'), check.grades.os)
-      $('os-requirement').textContent = check.yours.os.indexOf('macos-') === 0
+      const osReq = check.yours.os === 'linux'
+        ? 'Ubuntu 22.04+ (experimental)'
+        : check.yours.os.indexOf('macos-') === 0
         ? 'macOS 12+'
         : 'Windows 10/11'
+      $('os-requirement').textContent = osReq
 
       // Hosted and subscription modes remain a comment-only future extension.
       $('hardware-summary').textContent = check.level === 'ready' ? 'Ready' : check.level === 'warn' ? 'Review' : 'Blocked'

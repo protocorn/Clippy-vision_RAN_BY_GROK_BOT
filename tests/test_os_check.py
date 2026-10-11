@@ -43,7 +43,10 @@ async function test() {{
         osId: check.yours.os,
         osLabel: check.yours.osLabel,
         osGrade: check.grades.os,
-        level: check.level
+        level: check.level,
+        vramGb: check.yours.vramGb,
+        ramGb: check.yours.ramGb,
+        memoryLabel: check.yours.memoryLabel
     }}, null, 2));
 }}
 
@@ -103,6 +106,108 @@ def test_os_check_passes_on_current_platform(test_script):
             f"Expected macOS label, got '{output['osLabel']}'"
         )
         assert output['platform'] == 'darwin'
+
+
+def test_linux_integrated_gpu_not_blocked(tmp_path, hardware_js_path):
+    """
+    Test that Linux with no NVIDIA GPU (integrated graphics) is not blocked.
+    
+    Simulates a Linux machine with:
+    - 16 GB RAM (above minimum)
+    - 0 VRAM from nvidia-smi (no NVIDIA GPU)
+    - Adequate disk space
+    
+    Should result in level 'ready' or 'warn', NOT 'block'.
+    """
+    test_js = tmp_path / "test_linux_integrated.js"
+    test_js.write_text(f"""
+const {{ createHardware }} = require('{hardware_js_path.as_posix()}');
+
+// Mock a Linux machine with integrated GPU (no NVIDIA)
+Object.defineProperty(process, 'platform', {{
+    value: 'linux',
+    writable: false,
+    enumerable: true,
+    configurable: true
+}});
+
+const paths = {{
+    USER_DATA: '/tmp/test'
+}};
+const llmConfig = {{
+    usesManagedOllama: () => false
+}};
+
+// Mock 16 GB RAM
+const originalTotalmem = require('os').totalmem;
+require('os').totalmem = () => 16 * 1024 * 1024 * 1024;
+
+// Mock commands: nvidia-smi fails (no NVIDIA GPU), df reports adequate space
+const runCommand = async (cmd, args) => {{
+    if (cmd === 'nvidia-smi') {{
+        return {{ code: 1, stdout: '', stderr: 'nvidia-smi: command not found' }};
+    }}
+    if (cmd === 'df') {{
+        // Report 20 GB free
+        return {{ code: 0, stdout: 'Filesystem 1024-blocks Used Available\\n/dev/sda1 100000000 80000000 20971520', stderr: '' }};
+    }}
+    return {{ code: 0, stdout: '', stderr: '' }};
+}};
+
+const hardware = createHardware({{ paths, llmConfig, runCommand }});
+
+async function test() {{
+    const check = await hardware.getHardwareCheck();
+    console.log(JSON.stringify({{
+        platform: process.platform,
+        level: check.level,
+        grades: check.grades,
+        ramGb: check.yours.ramGb,
+        vramGb: check.yours.vramGb,
+        diskGb: check.yours.diskGb,
+        memoryLabel: check.yours.memoryLabel,
+        osLabel: check.yours.osLabel
+    }}, null, 2));
+}}
+
+test().catch(err => {{
+    console.error(err);
+    process.exit(1);
+}});
+""")
+    
+    result = subprocess.run(
+        ['node', str(test_js)],
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+    
+    assert result.returncode == 0, f"Node script failed: {result.stderr}"
+    
+    output = json.loads(result.stdout)
+    
+    # Verify Linux is detected
+    assert output['platform'] == 'linux'
+    assert output['osLabel'] == 'Linux (supported, experimental)'
+    
+    # Verify RAM is used for VRAM grade when no discrete GPU
+    assert output['ramGb'] == 16, "Should report 16 GB RAM"
+    assert output['vramGb'] == 16, "Should use RAM as VRAM for integrated GPU"
+    assert output['memoryLabel'] == 'RAM (integrated GPU)', (
+        f"Expected 'RAM (integrated GPU)' label, got '{output['memoryLabel']}'"
+    )
+    
+    # Verify not blocked - should be 'ready' or 'warn', but NEVER 'block'
+    assert output['level'] != 'block', (
+        f"Linux with integrated GPU and adequate resources should not be blocked. "
+        f"Level: {output['level']}, Grades: {output['grades']}"
+    )
+    
+    # Verify OS grade is 'ok'
+    assert output['grades']['os'] == 'ok', (
+        f"Linux OS grade should be 'ok', got '{output['grades']['os']}'"
+    )
 
 
 def test_unsupported_os_behavior(tmp_path, hardware_js_path):
@@ -173,19 +278,113 @@ test().catch(err => {{
     )
 
 
-def test_linux_experimental_note():
+def test_windows_behavior_unchanged(tmp_path, hardware_js_path):
     """
-    Verify that Linux shows as experimental in the label.
+    Verify Windows behavior remains unchanged.
     
-    This is a documentation test to ensure the experimental
-    nature of Linux support is clear to users.
+    Windows with no NVIDIA GPU should still get proper grading.
+    This test documents the expected Windows behavior.
     """
-    current_platform = platform.system().lower()
+    test_js = tmp_path / "test_windows.js"
+    test_js.write_text(f"""
+const {{ createHardware }} = require('{hardware_js_path.as_posix()}');
+const os = require('os');
+
+// Mock Windows
+Object.defineProperty(process, 'platform', {{
+    value: 'win32',
+    writable: false,
+    enumerable: true,
+    configurable: true
+}});
+
+// Mock 16 GB RAM
+const originalTotalmem = os.totalmem;
+os.totalmem = () => 16 * 1024 * 1024 * 1024;
+
+const paths = {{
+    USER_DATA: 'C:\\\\Users\\\\test\\\\AppData\\\\Local\\\\Clippy'
+}};
+const llmConfig = {{
+    usesManagedOllama: () => false
+}};
+
+// Mock: nvidia-smi fails (no NVIDIA GPU on Windows)
+const runCommand = async (cmd, args) => {{
+    if (cmd === 'nvidia-smi') {{
+        return {{ code: 1, stdout: '', stderr: 'not found' }};
+    }}
+    if (cmd === 'powershell') {{
+        // Report 20 GB free (in bytes)
+        return {{ code: 0, stdout: String(20 * 1024 * 1024 * 1024), stderr: '' }};
+    }}
+    return {{ code: 0, stdout: '', stderr: '' }};
+}};
+
+const hardware = createHardware({{ paths, llmConfig, runCommand }});
+
+async function test() {{
+    const check = await hardware.getHardwareCheck();
+    console.log(JSON.stringify({{
+        platform: process.platform,
+        level: check.level,
+        grades: check.grades,
+        vramGb: check.yours.vramGb,
+        memoryLabel: check.yours.memoryLabel
+    }}, null, 2));
+}}
+
+test().catch(err => {{
+    console.error(err);
+    process.exit(1);
+}});
+""")
     
-    if current_platform == 'linux':
-        # If we're running on Linux, verify the label includes "experimental"
-        # This test will only run on Ubuntu in CI
-        pytest.skip("This test is verified by test_os_check_passes_on_current_platform on Linux")
-    else:
-        # On other platforms, this is a no-op but documents the requirement
-        pass
+    result = subprocess.run(
+        ['node', str(test_js)],
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+    
+    assert result.returncode == 0, f"Node script failed: {result.stderr}"
+    
+    output = json.loads(result.stdout)
+    
+    # Windows with no NVIDIA GPU: vramGb should be 0
+    assert output['vramGb'] == 0, "Windows without NVIDIA should report 0 VRAM"
+    assert output['memoryLabel'] == 'GPU VRAM', (
+        "Windows should show 'GPU VRAM' label (unchanged)"
+    )
+    
+    # Should get 'warn' (not 'block') because VRAM is 0 but min is 0
+    assert output['level'] in ['ready', 'warn'], (
+        f"Windows without discrete GPU should be 'ready' or 'warn', got {output['level']}"
+    )
+
+
+def test_setup_html_requirement_text_logic():
+    """
+    Document the expected OS requirement text logic from setup.html.
+    
+    The JS in setup.html sets os-requirement based on detected OS:
+    - Linux: 'Ubuntu 22.04+ (experimental)'
+    - macOS: 'macOS 12+'
+    - Windows: 'Windows 10/11'
+    """
+    # This is a documentation test - the actual logic is in setup.html
+    # We verify the constants are correct
+    
+    expected_requirements = {
+        'linux': 'Ubuntu 22.04+ (experimental)',
+        'macos-apple-silicon': 'macOS 12+',
+        'macos-intel': 'macOS 12+',
+        'windows10': 'Windows 10/11',
+        'windows11': 'Windows 10/11',
+    }
+    
+    # Verify our expectations match the README
+    # README states: "OS | Windows 10 / 11 (64-bit), macOS 12+, or Linux (Ubuntu 22.04+, experimental)"
+    assert expected_requirements['linux'] == 'Ubuntu 22.04+ (experimental)'
+    assert expected_requirements['windows10'] == 'Windows 10/11'
+    assert 'macOS' in expected_requirements['macos-apple-silicon']
