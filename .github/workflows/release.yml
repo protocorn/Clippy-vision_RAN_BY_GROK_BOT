@@ -526,23 +526,23 @@ jobs:
           mkdir -p "$CONFIG_DIR"
           
           # Create setup_complete.json
-          cat > "$CONFIG_DIR/setup_complete.json" << 'EOF'
-{
-  "version": "2.1.0",
-  "completedAt": "2026-10-11T17:00:00.000Z"
-}
-EOF
+          cat > "$CONFIG_DIR/setup_complete.json" << 'EOF_SETUP'
+          {
+            "version": "2.1.0",
+            "completedAt": "2026-10-11T17:00:00.000Z"
+          }
+          EOF_SETUP
           
           # Create llm_config.json with stub HTTP endpoint (bypass Ollama requirement)
-          cat > "$CONFIG_DIR/llm_config.json" << 'EOF'
-{
-  "provider": "ollama",
-  "base_url": "http://127.0.0.1:11555",
-  "api_key": "",
-  "chat_model": "test-model",
-  "embedding_model": "nomic-embed-text"
-}
-EOF
+          cat > "$CONFIG_DIR/llm_config.json" << 'EOF_LLM'
+          {
+            "provider": "ollama",
+            "base_url": "http://127.0.0.1:11555",
+            "api_key": "",
+            "chat_model": "test-model",
+            "embedding_model": "nomic-embed-text"
+          }
+          EOF_LLM
           
           # Start stub LLM API server to satisfy preflight checks
           echo "Starting stub LLM API server on port 11555..."
