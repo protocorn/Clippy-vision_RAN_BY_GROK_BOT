@@ -97,7 +97,10 @@ class TestGrabLinuxScreen(unittest.TestCase):
 
 
 def _spawn_xvfb_fixture_window() -> subprocess.Popen | None:
-    """Draw a visible window so mss has non-black pixels under Xvfb."""
+    """Draw a visible window so mss has non-black pixels under Xvfb.
+    
+    Waits for the window to be mapped using xdotool to avoid race conditions.
+    """
     try:
         proc = subprocess.Popen(
             [
@@ -115,16 +118,72 @@ def _spawn_xvfb_fixture_window() -> subprocess.Popen | None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        time.sleep(0.6)
+        
+        # Wait for the window to be mapped using xdotool
+        # This is more reliable than a fixed sleep
+        if not _wait_for_xterm_window(timeout=5.0):
+            proc.terminate()
+            return None
+        
         return proc
     except (OSError, subprocess.SubprocessError):
         return None
 
 
+def _wait_for_xterm_window(timeout: float = 5.0) -> bool:
+    """Wait for an xterm window to appear and be mapped.
+    
+    Uses xdotool search --sync to wait for the window.
+    Falls back to polling xwininfo if xdotool is not available.
+    """
+    import shutil
+    
+    # First try xdotool search --sync (most reliable)
+    if shutil.which("xdotool"):
+        try:
+            result = subprocess.run(
+                ["xdotool", "search", "--sync", "--class", "XTerm"],
+                timeout=timeout,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # Give the window a moment to finish initial rendering
+                time.sleep(0.2)
+                return True
+        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            pass
+    
+    # Fallback: poll for window list
+    if shutil.which("xwininfo"):
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                result = subprocess.run(
+                    ["xwininfo", "-root", "-tree"],
+                    timeout=2.0,
+                    capture_output=True,
+                    check=False,
+                )
+                if result.returncode == 0 and b"xterm" in result.stdout.lower():
+                    time.sleep(0.2)
+                    return True
+            except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+                pass
+            time.sleep(0.1)
+    
+    # Last resort: fixed sleep
+    time.sleep(1.5)
+    return True
+
+
 @pytest.mark.linux
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux-only Xvfb capture test")
 def test_x11_screenshot_non_blank_under_xvfb():
-    """Real grab under Xvfb; CI runs this step with xvfb-run."""
+    """Real grab under Xvfb; CI runs this step with xvfb-run.
+    
+    Polls for a non-blank capture to handle any remaining rendering delays.
+    """
     if not os.environ.get("DISPLAY"):
         pytest.skip("DISPLAY not set (run under xvfb-run)")
 
@@ -133,15 +192,40 @@ def test_x11_screenshot_non_blank_under_xvfb():
         pytest.skip("xterm not available for Xvfb fixture")
 
     reset_linux_screenshot_warnings()
+    
+    # Poll for a non-blank capture within timeout
+    # This handles any remaining race conditions with window rendering
+    result = None
+    timeout = 10.0
+    start = time.time()
+    attempt = 0
+    
     with patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11"}, clear=False):
-        result = grab_linux_screen(capture_all_monitors=True)
-    assert result is not None
+        while time.time() - start < timeout:
+            attempt += 1
+            reset_linux_screenshot_warnings()  # Suppress spam during polling
+            result = grab_linux_screen(capture_all_monitors=True)
+            if result is not None:
+                img, monitor = result
+                if not image_is_blank_or_black(img):
+                    break
+            result = None
+            time.sleep(0.3)
+    
+    fixture.terminate()
+    
+    if result is None:
+        pytest.fail(
+            f"Failed to capture non-blank frame after {attempt} attempts "
+            f"over {time.time() - start:.1f}s. The xterm fixture window may not "
+            "be rendering properly under Xvfb."
+        )
+    
     img, monitor = result
     assert img.width >= 1 and img.height >= 1
     assert monitor["width"] == img.width
     assert monitor["height"] == img.height
     assert not image_is_blank_or_black(img)
-    fixture.terminate()
 
 
 @pytest.mark.linux
