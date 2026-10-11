@@ -431,6 +431,29 @@ def get_foreground_window_rect(hwnd: int | None = None) -> tuple[int, int, int, 
             return None
     if IS_MACOS:
         return get_foreground_window_bounds()
+    if IS_LINUX and shutil.which("xdotool"):
+        raw = _run_command(
+            ["xdotool", "getactivewindow", "getwindowgeometry", "--shell"],
+            timeout=2.0,
+        )
+        if raw:
+            values: dict[str, int] = {}
+            for line in raw.splitlines():
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key in {"X", "Y", "WIDTH", "HEIGHT"}:
+                    try:
+                        values[key] = int(value)
+                    except ValueError:
+                        pass
+            if all(k in values for k in ("X", "Y", "WIDTH", "HEIGHT")):
+                left = values["X"]
+                top = values["Y"]
+                right = left + values["WIDTH"]
+                bottom = top + values["HEIGHT"]
+                if right > left and bottom > top:
+                    return left, top, right, bottom
     return None
 
 

@@ -62,7 +62,7 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
 
-**Linux support (experimental):** Capture runs with limited features (window titles via `xdotool`, clipboard via `wl-paste`/`xclip`/`xsel`). Screenshots, AT-SPI accessibility text, and installers are not verified or implemented yet.
+**Linux support (experimental):** Capture runs with limited features. On **X11**, screenshots use `mss` (optional crop to the focused window via `xdotool`). On **native Wayland**, screenshots are skipped until xdg-desktop-portal support lands (blank XWayland grabs are not stored); wlroots users can install `grim` for captures. Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text and installers are not implemented yet.
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 

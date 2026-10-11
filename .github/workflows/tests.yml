@@ -30,6 +30,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
           pip install -r requirements.txt
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq xvfb x11-xserver-utils xterm
+          fi
       
       - name: List installed packages
         run: pip list
@@ -54,6 +58,8 @@ jobs:
           else
             # Ubuntu: run all tests except Windows/macOS-specific, GUI, Ollama, and integration
             pytest tests/ -v -m "not windows and not macos and not requires_gui and not requires_ollama and not integration"
+            xvfb-run -a pytest tests/test_linux_screenshot_capture.py -v -m "linux" \
+              -k "xvfb"
           fi
         shell: bash
       

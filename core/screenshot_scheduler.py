@@ -18,6 +18,7 @@ except ImportError:
 
 try:
     from core.platform_support import (
+        IS_LINUX,
         IS_MACOS,
         IS_WINDOWS,
         get_foreground_window_bounds,
@@ -27,6 +28,7 @@ try:
     )
 except ImportError:
     from platform_support import (
+        IS_LINUX,
         IS_MACOS,
         IS_WINDOWS,
         get_foreground_window_bounds,
@@ -721,15 +723,24 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
             hwnd_before = _foreground_hwnd()
             metadata_before = get_window_metadata()
             with timed("screenshot.grab"):
-                with mss.mss() as sct:
-                    settings = get_capture_settings()
-                    monitor = dict(
-                        sct.monitors[0]
-                        if settings["capture_all_monitors"]
-                        else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
-                    )
-                    screenshot = sct.grab(monitor)
-                    img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
+                settings = get_capture_settings()
+                if IS_LINUX:
+                    from core.linux_screenshot import grab_linux_screen
+
+                    grabbed = grab_linux_screen(settings["capture_all_monitors"])
+                    if grabbed is None:
+                        increment("screenshots.skipped_linux")
+                        return None
+                    img, monitor = grabbed
+                else:
+                    with mss.mss() as sct:
+                        monitor = dict(
+                            sct.monitors[0]
+                            if settings["capture_all_monitors"]
+                            else (sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0])
+                        )
+                        screenshot = sct.grab(monitor)
+                        img = Image.frombytes("RGB", screenshot.size, screenshot.rgb)
 
             hwnd_after = _foreground_hwnd()
             window_changed = (
@@ -773,6 +784,10 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
                             rect = None
                     elif IS_MACOS:
                         rect = get_foreground_window_bounds()
+                    else:
+                        from core.platform_support import get_foreground_window_rect
+
+                        rect = get_foreground_window_rect(hwnd)
                     if not rect:
                         increment("screenshots.secret_scan_timeout")
                         print("[capture] skipped frame; auth window bounds unknown")
