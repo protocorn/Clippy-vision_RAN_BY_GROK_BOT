@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -206,24 +207,128 @@ def _validate_user_message(message: str) -> str:
     return text
 
 
-# --- Archived in-app chat (see archive/in_app_chat/) ---
+# --- In-app chat endpoints ---
 
 @app.post("/chat")
 def chat(req: QueryRequest):
-    _validate_user_message(req.message)
-    return {"result": MCP_CHAT_GUIDANCE, "chat_disabled": True, "use": "mcp"}
+    """Non-streaming chat endpoint. Returns complete response."""
+    from agent.conversation import save_chat
+    from core.chat_context import build_recent_context, format_context_for_prompt
+    from core.chat_model import get_chat_model
+    from core.llm_gateway import Priority, gateway
+    from core.ollama_client import OllamaUnavailable
+    
+    message = _validate_user_message(req.message)
+    conversation_id = (req.conversation_id or "").strip() or str(time.time())
+    
+    try:
+        # Build context from recent activity
+        context = build_recent_context(lookback_minutes=60, max_sessions=5, max_events=10)
+        context_text = format_context_for_prompt(context)
+        
+        # Build messages for Ollama
+        system_message = (
+            "You are Clippy Vision's assistant. You have access to the user's recent "
+            "captured activity (screen text, window titles, apps used, and summaries). "
+            "Answer questions about their activity concisely and helpfully.\n\n"
+            f"{context_text}"
+        )
+        
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": message}
+        ]
+        
+        # Call Ollama
+        model = get_chat_model()
+        response = gateway.chat(messages, model, priority=Priority.INTERACTIVE, timeout=120)
+        
+        if not response:
+            raise HTTPException(status_code=500, detail="No response from model")
+        
+        assistant_message = response.get("message", {}).get("content", "")
+        
+        # Save conversation
+        save_chat(conversation_id, "user", message)
+        save_chat(conversation_id, "assistant", assistant_message)
+        
+        return {
+            "result": assistant_message,
+            "conversation_id": conversation_id,
+            "chat_disabled": False
+        }
+    
+    except OllamaUnavailable as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is not running. Please start Ollama and try again."
+        )
+    except Exception as e:
+        print(f"[chat] error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat/stream")
 def chat_stream(req: QueryRequest):
-    _validate_user_message(req.message)
+    """Streaming chat endpoint. Returns SSE stream."""
+    from agent.conversation import save_chat
+    from core.chat_context import build_recent_context, format_context_for_prompt
+    from core.chat_model import get_chat_model
+    from core.llm_gateway import Priority, gateway
+    from core.ollama_client import OllamaUnavailable
+    
+    message = _validate_user_message(req.message)
+    conversation_id = (req.conversation_id or "").strip() or str(time.time())
 
     def event_gen():
+        accumulated = []
         try:
-            yield f"data: {json.dumps({'type': 'status', 'text': 'MCP is the chat surface'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'content', 'delta': MCP_CHAT_GUIDANCE}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'result': MCP_CHAT_GUIDANCE, 'chat_disabled': True, 'use': 'mcp'}, ensure_ascii=False)}\n\n"
+            # Build context from recent activity
+            yield f"data: {json.dumps({'type': 'status', 'text': 'Retrieving context...'}, ensure_ascii=False)}\n\n"
+            
+            context = build_recent_context(lookback_minutes=60, max_sessions=5, max_events=10)
+            context_text = format_context_for_prompt(context)
+            
+            # Build messages for Ollama
+            system_message = (
+                "You are Clippy Vision's assistant. You have access to the user's recent "
+                "captured activity (screen text, window titles, apps used, and summaries). "
+                "Answer questions about their activity concisely and helpfully.\n\n"
+                f"{context_text}"
+            )
+            
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": message}
+            ]
+            
+            yield f"data: {json.dumps({'type': 'status', 'text': 'Generating response...'}, ensure_ascii=False)}\n\n"
+            
+            # Stream from Ollama
+            model = get_chat_model()
+            stream = gateway.chat_stream(messages, model, priority=Priority.INTERACTIVE, timeout=120)
+            
+            if not stream:
+                raise Exception("No stream returned from gateway")
+            
+            for chunk in stream:
+                delta = chunk.get("message", {}).get("content", "")
+                if delta:
+                    accumulated.append(delta)
+                    yield f"data: {json.dumps({'type': 'content', 'delta': delta}, ensure_ascii=False)}\n\n"
+            
+            # Save conversation
+            assistant_message = "".join(accumulated)
+            save_chat(conversation_id, "user", message)
+            save_chat(conversation_id, "assistant", assistant_message)
+            
+            yield f"data: {json.dumps({'type': 'done', 'result': assistant_message, 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
+        
+        except OllamaUnavailable as e:
+            error_msg = "Ollama is not running. Please start Ollama and try again."
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'ollama_unavailable': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
+            print(f"[chat/stream] error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
