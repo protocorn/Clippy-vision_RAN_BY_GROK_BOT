@@ -324,11 +324,9 @@ def _foreground_accessibility_text() -> str:
         return ""
     
     # Check if the foreground window has opted out of capture
-    from core.capture_optout import should_skip_capture
-    
-    hwnd_check = _foreground_hwnd()
-    bounds_check = get_foreground_window_bounds() if IS_MACOS else None
-    if should_skip_capture(hwnd_check, process_name, bounds_check):
+    from core.capture_optout import foreground_should_skip_capture
+
+    if foreground_should_skip_capture(_foreground_hwnd(), process_name):
         return ""
     captured_text = extract_accessibility_text()
     current = get_window_metadata()
@@ -722,11 +720,9 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
         return None
     
     # Check if the foreground window has opted out of capture via OS-level signals
-    from core.capture_optout import should_skip_capture
-    
-    hwnd_check = _foreground_hwnd()
-    bounds_check = get_foreground_window_bounds() if IS_MACOS else None
-    if should_skip_capture(hwnd_check, process_name, bounds_check):
+    from core.capture_optout import foreground_should_skip_capture
+
+    if foreground_should_skip_capture(_foreground_hwnd(), process_name):
         increment("screenshots.opted_out")
         return None
     
