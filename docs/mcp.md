@@ -16,7 +16,9 @@ The same privacy redactor that runs before storage runs again on every tool repl
 
 Screen-derived content (OCR text, window titles, URLs, clipboard, accessibility text) is attacker-controllable: any web page, email, or document the user views can contain text like "ignore previous instructions and..." that attempts prompt injection attacks against the connected AI model.
 
-To mitigate this risk, all MCP tool replies that include captured screen content wrap that content in clearly delimited blocks with a preamble marking it as untrusted data rather than instructions. The delimiter escaping is robust against breakout attempts (captured text containing the closing delimiter is neutralized automatically).
+To mitigate this risk, all MCP tool replies that include captured screen content wrap that content in clearly delimited blocks with a preamble marking it as untrusted data rather than instructions. Each reply uses a random nonce in the delimiters (e.g., `<<<CAPTURED_SCREEN_DATA id=3f9a...>>>` ... `<<<END_CAPTURED_SCREEN_DATA id=3f9a...>>>`) to make them unforgeable. The delimiter escaping is robust against breakout attempts (captured text containing fake end markers is neutralized automatically).
+
+**For MCP client developers**: Tool replies now return wrapped text blocks rather than raw JSON strings. If your client attempts to JSON-parse the reply directly, read the content between the delimiters instead. Most MCP clients handle this automatically, but custom integrations should expect the wrapper format.
 
 This protection is transparent to legitimate MCP clients and models, which can still parse and use the captured content normally while being explicitly warned that it is observed data rather than trusted instructions.
 

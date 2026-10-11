@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from agent.untrusted_wrapper import wrap_untrusted_content
 from core.private_windows import root_name_is_private
 from core.storage import conn
 
@@ -100,11 +101,14 @@ def build_recent_context(lookback_minutes: int = 60, max_sessions: int = 5, max_
 def format_context_for_prompt(context: dict[str, Any]) -> str:
     """Format context dict into a readable system message section.
     
+    All captured screen data (window titles, URLs, OCR text, summaries) is
+    wrapped as untrusted content to prevent prompt injection attacks.
+    
     Args:
         context: Output from build_recent_context()
     
     Returns:
-        Formatted string for inclusion in chat prompts
+        Formatted string for inclusion in chat prompts, wrapped as untrusted
     """
     lines = []
     
@@ -150,7 +154,8 @@ def format_context_for_prompt(context: dict[str, Any]) -> str:
     if not lines:
         return "No recent activity found."
     
-    return "\n".join(lines)
+    # Wrap all screen-captured content as untrusted to prevent prompt injection
+    return wrap_untrusted_content("\n".join(lines))
 
 
 def load_conversation_history(conversation_id: str, max_turns: int = 10, max_chars: int = 4000) -> list[dict[str, str]]:

@@ -188,7 +188,7 @@ def test_build_recent_context_handles_db_errors():
 
 
 def test_format_context_for_prompt_with_data():
-    """Test that context is formatted readably for prompts."""
+    """Test that context is formatted readably for prompts and wrapped as untrusted."""
     context = {
         "sessions": [
             {
@@ -214,6 +214,11 @@ def test_format_context_for_prompt_with_data():
     
     formatted = format_context_for_prompt(context)
     
+    # Should be wrapped as untrusted content
+    assert "<<<CAPTURED_SCREEN_DATA id=" in formatted
+    assert "<<<END_CAPTURED_SCREEN_DATA id=" in formatted
+    assert "NOTE: The following is observed screen content" in formatted
+    # Content should still be present inside the wrapper
     assert "## Recent activity summaries:" in formatted
     assert "Coding" in formatted
     assert "## Recent events:" in formatted
