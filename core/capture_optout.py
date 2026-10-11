@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 from typing import Optional
 
 try:
@@ -21,32 +22,33 @@ try:
 except ImportError:
     from platform_support import IS_MACOS, IS_WINDOWS, IS_LINUX
 
-# Cache window opt-out status to avoid repeated OS queries
+# Windows cache: short TTL since display affinity can change at runtime
+# (password managers toggle it on unlock) and HWNDs get reused
 _cache_lock = threading.Lock()
-_cache: dict[int, bool] = {}
-_MAX_CACHE = 256
+_cache: dict[int, tuple[bool, float]] = {}  # hwnd -> (opted_out, timestamp)
+_CACHE_TTL_SECONDS = 2.0
 
-# Well-known password manager and private-mode processes that commonly opt out
+# Well-known password manager processes that commonly opt out
 # These are checked as a fallback when OS-level detection isn't available
-PRIVATE_PROCESSES = {
-    # Password managers
+# Uses exact matching on normalized executable/bundle name to avoid false positives
+PASSWORD_MANAGERS = {
+    # Exact process names (after removing .exe/.app)
     "1password",
+    "1password-browser",  # Browser extension helper
+    "1passwordnative",    # Native messaging host
     "bitwarden",
     "dashlane",
     "keepass",
     "keepassxc",
+    "keepass2",
     "lastpass",
     "keeper",
+    "keepersecurityapp",
     "enpass",
     "nordpass",
     "roboform",
-    # Banking/financial
-    "moneydance",
-    "quicken",
-    "mint",
-    # DRM/media
-    "spotify",
-    "netflix",
+    "moneydance",  # Banking/financial app
+    "quicken",     # Banking/financial app
 }
 
 
@@ -61,9 +63,12 @@ def _normalize_process_name(process_name: str) -> str:
 
 
 def _is_private_process(process_name: str) -> bool:
-    """Check if process is a known private/sensitive application."""
+    """Check if process is a known password manager or sensitive application.
+    
+    Uses exact matching to avoid false positives (e.g. 'keeper' matching 'timekeeper').
+    """
     normalized = _normalize_process_name(process_name)
-    return any(private in normalized for private in PRIVATE_PROCESSES)
+    return normalized in PASSWORD_MANAGERS
 
 
 def _windows_window_opted_out(hwnd: int) -> bool:
@@ -116,6 +121,9 @@ def _macos_window_opted_out(bounds: tuple[int, int, int, int] | None) -> bool:
     macOS apps can set sharingType to NSWindowSharingNone to prevent capture.
     CGWindowListCopyWindowInfo exposes this as kCGWindowSharingState == 0.
     
+    Matches the frontmost window of the foreground app by owner PID to avoid
+    flagging background windows that merely overlap the bounds.
+    
     Returns True if the frontmost window has NSWindowSharingNone.
     Fails safe: returns False on error (allows capture).
     """
@@ -130,7 +138,7 @@ def _macos_window_opted_out(bounds: tuple[int, int, int, int] | None) -> bool:
             kCGNullWindowID,
         )
         
-        # Get all on-screen windows
+        # Get all on-screen windows in front-to-back order
         window_list = CGWindowListCopyWindowInfo(
             kCGWindowListOptionOnScreenOnly,
             kCGNullWindowID
@@ -139,32 +147,35 @@ def _macos_window_opted_out(bounds: tuple[int, int, int, int] | None) -> bool:
         if not window_list:
             return False
         
-        # Check the frontmost window(s) that overlap our bounds
+        # Find the frontmost window (first layer-0 window in the list)
+        # This is the active window of the foreground application
+        frontmost_pid = None
         for window in window_list:
-            # kCGWindowLayer 0 is typically the frontmost app layer
+            layer = window.get("kCGWindowLayer", -1)
+            if layer == 0:
+                frontmost_pid = window.get("kCGWindowOwnerPID")
+                break
+        
+        if frontmost_pid is None:
+            return False
+        
+        # Check if the frontmost window of that app has opted out
+        for window in window_list:
+            pid = window.get("kCGWindowOwnerPID")
+            if pid != frontmost_pid:
+                continue
+            
             layer = window.get("kCGWindowLayer", -1)
             if layer != 0:
-                continue
-            
-            # Check if this window overlaps the foreground bounds
-            window_bounds = window.get("kCGWindowBounds")
-            if not window_bounds:
-                continue
-            
-            wx = int(window_bounds.get("X", 0))
-            wy = int(window_bounds.get("Y", 0))
-            ww = int(window_bounds.get("Width", 0))
-            wh = int(window_bounds.get("Height", 0))
-            
-            # Simple overlap check with foreground window
-            if not (wx < bounds[2] and wx + ww > bounds[0] and 
-                   wy < bounds[3] and wy + wh > bounds[1]):
                 continue
             
             # kCGWindowSharingState: 0 = NSWindowSharingNone (opted out)
             sharing_state = window.get("kCGWindowSharingState", 1)
             if sharing_state == 0:
                 return True
+            
+            # We only check the first (frontmost) window of the foreground app
+            break
         
         return False
         
@@ -200,7 +211,7 @@ def window_opted_out(hwnd: int | None = None, process_name: str = "",
     - macOS: CGWindowList kCGWindowSharingState for NSWindowSharingNone
     - Linux: No standard mechanism (returns False unless process-name match)
     
-    Also checks against PRIVATE_PROCESSES for well-known password managers
+    Also checks against PASSWORD_MANAGERS for well-known password managers
     and sensitive apps as a fallback.
     
     Args:
@@ -218,22 +229,28 @@ def window_opted_out(hwnd: int | None = None, process_name: str = "",
     
     # Platform-specific OS-level checks
     if IS_WINDOWS and hwnd:
-        # Check cache first
+        # Check cache first (with TTL)
+        now = time.time()
         with _cache_lock:
             cached = _cache.get(hwnd)
             if cached is not None:
-                return cached
+                opted_out, timestamp = cached
+                if now - timestamp < _CACHE_TTL_SECONDS:
+                    return opted_out
         
+        # Cache miss or expired - check OS
         opted_out = _windows_window_opted_out(hwnd)
         
-        # Cache the result
+        # Cache the result with timestamp
         with _cache_lock:
-            _cache[hwnd] = opted_out
-            # Prune cache if it gets too large
-            if len(_cache) > _MAX_CACHE:
-                # Remove oldest entries (first half)
-                for key in list(_cache.keys())[:_MAX_CACHE // 2]:
-                    _cache.pop(key, None)
+            _cache[hwnd] = (opted_out, now)
+            # Prune old entries when cache grows
+            if len(_cache) > 256:
+                # Remove expired entries
+                cutoff = now - _CACHE_TTL_SECONDS
+                expired = [h for h, (_, ts) in _cache.items() if ts < cutoff]
+                for h in expired:
+                    _cache.pop(h, None)
         
         return opted_out
     
