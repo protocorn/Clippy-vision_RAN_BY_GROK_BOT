@@ -448,10 +448,20 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             await new Promise((resolve, reject) => {
                 const proc = spawnHidden(PYTHON_COMMAND, ['-m', 'core.ollama_pull', model.name], { cwd: ROOT })
                 let lastError = null
+                let lineBuffer = ''
+                let lastLoggedStatus = ''
+                let lastLoggedPercent = -10
 
                 proc.stdout.on('data', (chunk) => {
-                    const lines = chunk.toString().split('\n').filter(l => l.trim())
+                    // Buffer partial lines across chunks
+                    lineBuffer += chunk.toString()
+                    const lines = lineBuffer.split('\n')
+                    // Keep the last partial line in the buffer
+                    lineBuffer = lines.pop() || ''
+                    
                     for (const line of lines) {
+                        if (!line.trim()) continue
+                        
                         try {
                             const progress = JSON.parse(line)
                             
@@ -477,8 +487,22 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                                 stepUpdate('models', 'running', `${model.label}: ${progress.status}`)
                             }
                             
-                            // Log the status
-                            log(`${progress.status} - ${Math.round(progress.downloaded_mb)} / ${Math.round(progress.total_mb)} MB`, 'dim')
+                            // Throttle logging: only log on status changes or every ~10%
+                            const pct = Math.round(progress.percent)
+                            const statusChanged = progress.status !== lastLoggedStatus
+                            const percentJump = pct - lastLoggedPercent >= 10
+                            
+                            if (statusChanged || percentJump || progress.complete || progress.error) {
+                                lastLoggedStatus = progress.status
+                                lastLoggedPercent = pct
+                                
+                                // Only show MB when total is known
+                                if (progress.total_mb > 0) {
+                                    log(`${progress.status} - ${Math.round(progress.downloaded_mb)} / ${Math.round(progress.total_mb)} MB`, 'dim')
+                                } else {
+                                    log(progress.status, 'dim')
+                                }
+                            }
                         } catch (e) {
                             // Not JSON, just log it
                             log(line, 'dim')
@@ -491,6 +515,18 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                 })
 
                 proc.on('exit', (code) => {
+                    // Process any remaining buffered line
+                    if (lineBuffer.trim()) {
+                        try {
+                            const progress = JSON.parse(lineBuffer)
+                            if (progress.error) {
+                                lastError = progress.error
+                            }
+                        } catch (e) {
+                            // Ignore parse errors on final flush
+                        }
+                    }
+                    
                     if (code === 0) {
                         log(`${model.name} ready.`, 'ok')
                         resolve()

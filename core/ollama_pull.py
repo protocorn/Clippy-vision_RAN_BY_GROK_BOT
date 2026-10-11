@@ -7,6 +7,7 @@ as JSON lines that can be consumed by the Electron setup wizard.
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import sys
 import urllib.request
@@ -40,14 +41,18 @@ def pull_model(model: str) -> int:
     try:
         # Open the streaming response
         with urllib.request.urlopen(req, timeout=600) as response:
+            # Use an incremental decoder to handle multibyte UTF-8 characters
+            # split across chunk boundaries
+            decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+            
             # Read the stream in chunks
             while True:
                 chunk = response.read(8192)
                 if not chunk:
                     break
                 
-                # Decode and feed to parser
-                text = chunk.decode('utf-8', errors='replace')
+                # Decode incrementally (buffers partial multibyte sequences)
+                text = decoder.decode(chunk, False)
                 progress_updates = parser.feed(text)
                 
                 # Emit each progress update as a JSON line
@@ -67,6 +72,11 @@ def pull_model(model: str) -> int:
                         return 1
                     if progress.is_complete:
                         return 0
+            
+            # Flush any remaining bytes in the decoder
+            final_text = decoder.decode(b'', True)
+            if final_text:
+                parser.feed(final_text)
         
         # Process any remaining buffered data
         final = parser.finish()

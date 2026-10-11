@@ -355,3 +355,57 @@ def test_percent_clamped_to_100():
     assert len(results) == 1
     # Percent should be clamped to 100
     assert results[0].percent <= 100.0
+
+
+def test_multibyte_utf8_split_across_chunks():
+    """Test handling of multibyte UTF-8 characters split across feed calls."""
+    parser = OllamaPullParser()
+    
+    # Construct a JSON line with a multibyte UTF-8 character (emoji: 🚀 = F0 9F 9A 80)
+    # Split it in the middle of the multibyte sequence
+    json_line = '{"status":"downloading 🚀 model","digest":"sha256:layer1","total":1048576,"completed":524288}\n'
+    
+    # Split the string at a point that would split the multibyte character
+    # when encoded to UTF-8 bytes
+    encoded = json_line.encode('utf-8')
+    
+    # Find where the emoji bytes are
+    emoji_start = encoded.find(b'\xf0\x9f\x9a\x80')
+    
+    # Split in the middle of the emoji (after the first byte of the 4-byte sequence)
+    if emoji_start >= 0:
+        split_point = emoji_start + 1
+        chunk1 = encoded[:split_point].decode('utf-8', errors='ignore')
+        chunk2 = encoded[split_point:].decode('utf-8', errors='ignore')
+        
+        # Note: This test demonstrates that the parser is resilient to
+        # text corruption, but the actual fix is in ollama_pull.py which uses
+        # an incremental decoder. Here we just verify the parser doesn't crash
+        # when given already-corrupted input.
+        results1 = parser.feed(chunk1)
+        results2 = parser.feed(chunk2)
+        
+        # Should not crash and should produce some results
+        assert isinstance(results1, list)
+        assert isinstance(results2, list)
+
+
+def test_line_buffering_with_split_json():
+    """Test that partial JSON lines are buffered correctly across feeds."""
+    parser = OllamaPullParser()
+    
+    # Create a JSON line and split it at various points
+    json_str = '{"status":"downloading","digest":"sha256:abc123","total":1048576,"completed":524288}\n'
+    
+    # Split at character 50
+    chunk1 = json_str[:50]
+    chunk2 = json_str[50:]
+    
+    # First chunk should produce no results (incomplete line)
+    results1 = parser.feed(chunk1)
+    assert len(results1) == 0
+    
+    # Second chunk completes the line
+    results2 = parser.feed(chunk2)
+    assert len(results2) == 1
+    assert results2[0].downloaded_mb > 0
