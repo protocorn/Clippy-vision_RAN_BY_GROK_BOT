@@ -5,7 +5,11 @@ All notable changes to this project (the Grok Bot fork of Clippy Vision) will be
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [2.1.0] - Unreleased
+
+First release of the Grok Bot fork. Adds experimental Linux support, expands browser privacy detection, and establishes CI testing infrastructure.
+
+**Note:** macOS installers are not included in this release (opt-in only, requires manual validation).
 
 ### Added
 - Linux platform support with X11 screenshot capture ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10), [#14](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/14))
@@ -46,5 +50,5 @@ This is the fork point. All changes above are additions made by the Grok Bot for
 
 For changes prior to the fork, see the [upstream Clippy Vision repository](https://github.com/protocorn/clippy-vision).
 
-[Unreleased]: https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/compare/8271941...HEAD
+[2.1.0]: https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/compare/8271941...HEAD
 [2.0.0]: https://github.com/protocorn/clippy-vision/releases/tag/v2.0.0

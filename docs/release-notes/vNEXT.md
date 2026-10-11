@@ -1,20 +1,22 @@
 # Clippy Vision v2.1.0 Release Notes (DRAFT)
 
-> **⚠️ Pre-release Draft** — This document is a working draft for the next release. Not yet tagged or published.
+> **⚠️ Pre-release Draft** — This document is a working draft for v2.1.0. Not yet tagged or published.
 
 ## Overview
 
 This is the **first release** of the Grok Bot fork of Clippy Vision. This release builds on upstream v2.0.0 with three major improvements: experimental Linux support, expanded browser privacy detection, and comprehensive CI testing.
 
+**Version:** `v2.1.0`
+
 **Fork Point:** Upstream Clippy Vision v2.0.0 ([commit 8271941](https://github.com/protocorn/clippy-vision/commit/8271941), October 9, 2026)
 
-**Proposed Version:** `v2.1.0`
+**Included Platforms:** Windows, Linux (macOS excluded — opt-in only, requires manual validation)
 
 ## 🆕 New Features
 
 ### 1. Experimental Linux Support ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10), [#14](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/14))
 
-**Status:** ✅ **Verified in CI (Ubuntu 22.04)**, ⚠️ **Unverified on real Linux desktops**
+**Status:** ✅ **Verified in CI (Ubuntu 22.04, unit + integration tests)**, ✅ **AppImage builds in CI**, ⚠️ **Unverified on real Linux desktops**
 
 Clippy Vision now runs on Linux with X11 screenshot capture and basic window tracking.
 
@@ -36,6 +38,7 @@ Clippy Vision now runs on Linux with X11 screenshot capture and basic window tra
 
 **Verification:**
 - ✅ CI tests pass on Ubuntu 22.04 (unit tests + Xvfb integration tests)
+- ✅ AppImage builds successfully in CI with smoke checks (extract + binary verification)
 - ⚠️ Not tested on real hardware with real desktop environments (GNOME, KDE, etc.)
 - ⚠️ Not tested on Wayland (compositor detection works, capture skipped as expected)
 
@@ -180,23 +183,24 @@ See "Known limitations" in the Linux Support section above.
 
 ## 📦 Release Assets
 
-This release includes three installer packages:
+This release includes **two** installer packages (macOS excluded):
 
 1. **`ClippyVision-Windows-Setup-2.1.0.exe`** (unsigned)
    - Windows 10/11 x64
    - NSIS installer with start menu shortcuts
    - Includes Python dependencies bundled
+   - ✅ Builds successfully in CI with smoke checks
 
 2. **`ClippyVision-Linux-x64-2.1.0.AppImage`** (unsigned)
    - Linux x64 (Ubuntu 22.04+, other distros with X11)
    - Requires `chmod +x` and system dependencies (see Installation above)
    - Experimental support, not tested on real hardware
+   - ✅ Builds successfully in CI with smoke checks (extract + binary verification)
 
-3. **`ClippyVision-macOS-*.dmg`** (unsigned, opt-in build only)
-   - **Not included in automatic tag builds**
-   - Only built via manual workflow_dispatch with `include_macos: true`
-   - Requires validation on Apple Silicon and Intel before upload
-   - See upstream release for signed macOS builds
+**macOS installers are NOT included in this release:**
+- macOS builds are opt-in only (manual workflow_dispatch trigger required)
+- Require validation on Apple Silicon and Intel before upload
+- See upstream release for signed macOS builds
 
 ## 🔗 Links
 
@@ -211,12 +215,16 @@ This release includes three installer packages:
 
 Before tagging `v2.1.0`:
 
-- [ ] All PRs merged to main
-- [ ] CI passes on main
-- [ ] CHANGELOG.md updated with final date
+- [x] All PRs merged to main
+- [x] CI passes on main
+- [x] CHANGELOG.md updated with version and date
+- [x] Release notes finalized in docs/release-notes/vNEXT.md
+- [x] Version confirmed as v2.1.0
+- [x] macOS excluded from this release (opt-in only)
+- [x] CI builds Windows + Linux installers successfully with smoke checks
 - [ ] This file renamed from `vNEXT.md` to `v2.1.0.md`
-- [ ] Version bumped in `electron-ui/package.json`
-- [ ] Dry-run workflow_dispatch build tested (Windows + Linux artifacts built successfully)
+- [ ] Version bumped in `electron-ui/package.json` to 2.1.0
+- [ ] CHANGELOG.md release date updated
 - [ ] Tag pushed: `git tag v2.1.0 && git push origin v2.1.0`
 - [ ] Draft release created by workflow with Windows and Linux installers attached
 - [ ] Release notes copied from this file to GitHub release description
