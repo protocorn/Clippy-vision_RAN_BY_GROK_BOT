@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest
+          pip install pytest pytest-repeat
           pip install -r requirements.txt
       
       - name: Install Linux Xvfb test dependencies
@@ -60,8 +60,9 @@ jobs:
           else
             # Ubuntu: run all tests except Windows/macOS-specific, GUI, Ollama, and integration
             pytest tests/ -v -m "not windows and not macos and not requires_gui and not requires_ollama and not integration"
+            # TEMPORARY: Run Xvfb test 10 times to verify stability fix (PR #24)
             xvfb-run -a pytest tests/test_linux_screenshot_capture.py -v -m "linux" \
-              -k "xvfb"
+              -k "xvfb" --count=10
           fi
         shell: bash
       
