@@ -91,6 +91,64 @@ jobs:
           fi
           echo "✓ Windows installer OK"
 
+      - name: Silent install test Windows
+        shell: pwsh
+        working-directory: electron-ui/dist
+        run: |
+          Write-Host "Running silent installation..."
+          $installer = Get-ChildItem -Filter "ClippyVision-Windows-Setup-*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            Write-Error "No installer found"
+            exit 1
+          }
+          
+          Write-Host "Installing: $($installer.Name)"
+          $installLog = "install-test.log"
+          
+          # Run silent install
+          Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait -NoNewWindow
+          
+          Write-Host "Checking installation..."
+          $programFiles = ${env:ProgramFiles}
+          $installPath = "$programFiles\Clippy Vision"
+          $exePath = "$installPath\Clippy Vision.exe"
+          
+          if (Test-Path $exePath) {
+            Write-Host "✓ Installation successful: $exePath"
+            $exeSize = (Get-Item $exePath).Length
+            Write-Host "  Installed exe size: $exeSize bytes"
+            
+            # Brief launch test (5 seconds)
+            Write-Host "Attempting brief launch test..."
+            $process = Start-Process -FilePath $exePath -PassThru -WindowStyle Hidden
+            Start-Sleep -Seconds 5
+            
+            if ($process.HasExited) {
+              Write-Host "⚠ Process exited immediately (exit code: $($process.ExitCode))"
+              "Process exited after launch (code: $($process.ExitCode))" | Out-File $installLog
+            } else {
+              Write-Host "✓ Process still running after 5 seconds"
+              "Process launched successfully" | Out-File $installLog
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+          } else {
+            Write-Error "Installation failed - executable not found at: $exePath"
+            "Installation failed" | Out-File $installLog
+            exit 1
+          }
+          
+          Write-Host ""
+          Write-Host "✓ Silent install test completed"
+
+      - name: Upload Windows test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-test
+          path: |
+            electron-ui/dist/install-test.log
+          retention-days: 14
+
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -251,6 +309,90 @@ jobs:
           
           echo "✓ AppImage structure OK"
           rm -rf squashfs-root
+
+      - name: Launch test Linux AppImage under Xvfb
+        working-directory: electron-ui/dist
+        run: |
+          echo "Installing Xvfb and screenshot tools..."
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool
+          
+          APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
+          chmod +x "$APPIMAGE"
+          
+          echo "Starting Xvfb on :99..."
+          Xvfb :99 -screen 0 1024x768x24 &
+          XVFB_PID=$!
+          export DISPLAY=:99
+          sleep 2
+          
+          echo "Launching AppImage..."
+          LOG_FILE="launch-test.log"
+          ./"$APPIMAGE" > "$LOG_FILE" 2>&1 &
+          APP_PID=$!
+          
+          echo "AppImage PID: $APP_PID"
+          echo "Waiting 60 seconds..."
+          
+          # Monitor for 60 seconds
+          for i in {1..60}; do
+            if ! kill -0 $APP_PID 2>/dev/null; then
+              echo "ERROR: AppImage crashed after $i seconds"
+              cat "$LOG_FILE"
+              kill $XVFB_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 1
+          done
+          
+          echo "✓ AppImage still running after 60s"
+          
+          # Check for backend startup evidence
+          echo "Checking for Python backend..."
+          if grep -q "api_server\|mcp_server\|Uvicorn running\|Application startup complete" "$LOG_FILE" 2>/dev/null; then
+            echo "✓ Python backend started"
+          else
+            echo "⚠ Backend startup not detected in logs (may still be starting)"
+          fi
+          
+          # Check for Electron window
+          echo "Checking for Electron window..."
+          sleep 2
+          if xdotool search --name "Clippy" 2>/dev/null; then
+            echo "✓ Electron window detected"
+          else
+            echo "⚠ Electron window not found (may not have title yet)"
+          fi
+          
+          # Capture screenshot
+          echo "Capturing screenshot..."
+          import -window root -display :99 launch-screenshot.png 2>/dev/null || \
+            echo "Screenshot capture failed (non-critical)"
+          
+          # Show log excerpt
+          echo ""
+          echo "=== Launch log excerpt (first 50 lines) ==="
+          head -50 "$LOG_FILE"
+          echo ""
+          echo "=== Launch log excerpt (last 50 lines) ==="
+          tail -50 "$LOG_FILE"
+          
+          # Cleanup
+          kill $APP_PID 2>/dev/null || true
+          kill $XVFB_PID 2>/dev/null || true
+          
+          echo ""
+          echo "✓ Launch test completed successfully"
+
+      - name: Upload launch test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-launch-test
+          path: |
+            electron-ui/dist/launch-test.log
+            electron-ui/dist/launch-screenshot.png
+          retention-days: 14
 
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
