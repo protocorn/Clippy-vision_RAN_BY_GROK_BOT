@@ -100,6 +100,12 @@ def _spawn_xvfb_fixture_window() -> subprocess.Popen | None:
     """Draw a visible window so mss has non-black pixels under Xvfb.
     
     Waits for the window to be mapped using xdotool to avoid race conditions.
+    
+    Returns:
+        The xterm process, or None if xterm is not installed/available.
+        
+    Raises:
+        RuntimeError: If xterm spawns but the window never maps (test failure).
     """
     try:
         proc = subprocess.Popen(
@@ -118,23 +124,32 @@ def _spawn_xvfb_fixture_window() -> subprocess.Popen | None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        
-        # Wait for the window to be mapped using xdotool
-        # This is more reliable than a fixed sleep
-        if not _wait_for_xterm_window(timeout=5.0):
-            proc.terminate()
-            return None
-        
-        return proc
     except (OSError, subprocess.SubprocessError):
         return None
+    
+    # Wait for the window to be mapped using xdotool
+    # If this times out, it's a test failure, not a skip
+    try:
+        _wait_for_xterm_window(proc, timeout=5.0)
+    except RuntimeError:
+        proc.terminate()
+        raise
+    
+    return proc
 
 
-def _wait_for_xterm_window(timeout: float = 5.0) -> bool:
+def _wait_for_xterm_window(proc: subprocess.Popen, timeout: float = 5.0) -> None:
     """Wait for an xterm window to appear and be mapped.
     
     Uses xdotool search --sync to wait for the window.
     Falls back to polling xwininfo if xdotool is not available.
+    
+    Args:
+        proc: The xterm process to wait for.
+        timeout: Maximum time to wait in seconds.
+        
+    Raises:
+        RuntimeError: If the window doesn't map within the timeout.
     """
     import shutil
     
@@ -150,8 +165,12 @@ def _wait_for_xterm_window(timeout: float = 5.0) -> bool:
             if result.returncode == 0 and result.stdout.strip():
                 # Give the window a moment to finish initial rendering
                 time.sleep(0.2)
-                return True
-        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+                return
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"xterm window (PID {proc.pid}) did not map within {timeout}s timeout"
+            )
+        except (OSError, subprocess.SubprocessError):
             pass
     
     # Fallback: poll for window list
@@ -167,14 +186,17 @@ def _wait_for_xterm_window(timeout: float = 5.0) -> bool:
                 )
                 if result.returncode == 0 and b"xterm" in result.stdout.lower():
                     time.sleep(0.2)
-                    return True
+                    return
             except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
                 pass
             time.sleep(0.1)
+        
+        raise RuntimeError(
+            f"xterm window (PID {proc.pid}) did not appear in window list within {timeout}s timeout"
+        )
     
-    # Last resort: fixed sleep
+    # Last resort: fixed sleep (no verification possible)
     time.sleep(1.5)
-    return True
 
 
 @pytest.mark.linux
@@ -191,41 +213,42 @@ def test_x11_screenshot_non_blank_under_xvfb():
     if fixture is None:
         pytest.skip("xterm not available for Xvfb fixture")
 
-    reset_linux_screenshot_warnings()
-    
-    # Poll for a non-blank capture within timeout
-    # This handles any remaining race conditions with window rendering
-    result = None
-    timeout = 10.0
-    start = time.time()
-    attempt = 0
-    
-    with patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11"}, clear=False):
-        while time.time() - start < timeout:
-            attempt += 1
-            reset_linux_screenshot_warnings()  # Suppress spam during polling
-            result = grab_linux_screen(capture_all_monitors=True)
-            if result is not None:
-                img, monitor = result
-                if not image_is_blank_or_black(img):
-                    break
-            result = None
-            time.sleep(0.3)
-    
-    fixture.terminate()
-    
-    if result is None:
-        pytest.fail(
-            f"Failed to capture non-blank frame after {attempt} attempts "
-            f"over {time.time() - start:.1f}s. The xterm fixture window may not "
-            "be rendering properly under Xvfb."
-        )
-    
-    img, monitor = result
-    assert img.width >= 1 and img.height >= 1
-    assert monitor["width"] == img.width
-    assert monitor["height"] == img.height
-    assert not image_is_blank_or_black(img)
+    try:
+        reset_linux_screenshot_warnings()
+        
+        # Poll for a non-blank capture within timeout
+        # This handles any remaining race conditions with window rendering
+        result = None
+        timeout = 10.0
+        start = time.time()
+        attempt = 0
+        
+        with patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11"}, clear=False):
+            while time.time() - start < timeout:
+                attempt += 1
+                reset_linux_screenshot_warnings()  # Suppress spam during polling
+                result = grab_linux_screen(capture_all_monitors=True)
+                if result is not None:
+                    img, monitor = result
+                    if not image_is_blank_or_black(img):
+                        break
+                result = None
+                time.sleep(0.3)
+        
+        if result is None:
+            pytest.fail(
+                f"Failed to capture non-blank frame after {attempt} attempts "
+                f"over {time.time() - start:.1f}s. The xterm fixture window may not "
+                "be rendering properly under Xvfb."
+            )
+        
+        img, monitor = result
+        assert img.width >= 1 and img.height >= 1
+        assert monitor["width"] == img.width
+        assert monitor["height"] == img.height
+        assert not image_is_blank_or_black(img)
+    finally:
+        fixture.terminate()
 
 
 @pytest.mark.linux
@@ -244,32 +267,36 @@ def test_capture_screenshot_integration_under_xvfb():
     fixture = _spawn_xvfb_fixture_window()
     if fixture is None:
         pytest.skip("xterm not available for Xvfb fixture")
-    settings = {
-        "capture_screenshots": True,
-        "capture_all_monitors": True,
-        "min_gap_seconds": 0,
-        "capture_clipboard": False,
-    }
-    metadata = {
-        "timestamp": 0.0,
-        "current_window_title": "test",
-        "active_url": None,
-        "process_name": "xvfb",
-    }
-    with patch.object(scheduler, "get_capture_settings", return_value=settings), patch.object(
-        scheduler, "get_window_metadata", return_value=metadata
-    ), patch.object(scheduler, "should_watch_process", return_value=True), patch.object(
-        scheduler, "_redact_clippy_windows"
-    ), patch.object(scheduler, "save_crop_metadata"), patch(
-        "core.editor_accessibility.ensure_screen_reader_support"
-    ), patch.object(screenshot_files, "write_frame_window"):
-        path = scheduler.capture_screenshot(999_001)
-    fixture.terminate()
-    assert path is not None
-    assert Path(path).is_file()
-    img = Image.open(path)
-    assert not image_is_blank_or_black(img.convert("RGB"))
-    path.unlink(missing_ok=True)
+    
+    try:
+        settings = {
+            "capture_screenshots": True,
+            "capture_all_monitors": True,
+            "min_gap_seconds": 0,
+            "capture_clipboard": False,
+        }
+        metadata = {
+            "timestamp": 0.0,
+            "current_window_title": "test",
+            "active_url": None,
+            "process_name": "xvfb",
+        }
+        with patch.object(scheduler, "get_capture_settings", return_value=settings), patch.object(
+            scheduler, "get_window_metadata", return_value=metadata
+        ), patch.object(scheduler, "should_watch_process", return_value=True), patch.object(
+            scheduler, "_redact_clippy_windows"
+        ), patch.object(scheduler, "save_crop_metadata"), patch(
+            "core.editor_accessibility.ensure_screen_reader_support"
+        ), patch.object(screenshot_files, "write_frame_window"):
+            path = scheduler.capture_screenshot(999_001)
+        
+        assert path is not None
+        assert Path(path).is_file()
+        img = Image.open(path)
+        assert not image_is_blank_or_black(img.convert("RGB"))
+        path.unlink(missing_ok=True)
+    finally:
+        fixture.terminate()
 
 
 if __name__ == "__main__":
