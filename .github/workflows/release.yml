@@ -181,22 +181,22 @@ jobs:
               }
             }
             
-            # Try HTTP health check if port known
-            if (($null -ne $backendPort) -and (-not $backendHttpOk)) {
-              foreach ($host in @("127.0.0.1", "localhost")) {
-                try {
-                  $response = Invoke-WebRequest -Uri "http://${host}:${backendPort}/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
-                  if ($response.StatusCode -eq 200) {
-                    $backendHttpOk = $true
-                    Write-Host "✓ Backend HTTP responding on ${host}:${backendPort} at ${i}s"
-                    Write-Host "  Response: $($response.Content)"
-                    break
-                  }
-                } catch {
-                  # Connection failed, continue
+          # Try HTTP health check if port known
+          if (($null -ne $backendPort) -and (-not $backendHttpOk)) {
+            foreach ($hostAddr in @("127.0.0.1", "localhost")) {
+              try {
+                $response = Invoke-WebRequest -Uri "http://${hostAddr}:${backendPort}/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
+                if ($response.StatusCode -eq 200) {
+                  $backendHttpOk = $true
+                  Write-Host "✓ Backend HTTP responding on ${hostAddr}:${backendPort} at ${i}s"
+                  Write-Host "  Response: $($response.Content)"
+                  break
                 }
+              } catch {
+                # Connection failed, continue
               }
             }
+          }
             
             # Show progress every 10 seconds
             if ($i % 10 -eq 0) {
