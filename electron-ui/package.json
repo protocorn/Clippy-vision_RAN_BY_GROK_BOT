@@ -9,12 +9,13 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "dist:all": "electron-builder --win --mac",
+    "dist:all": "electron-builder --win --mac --linux",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:mac:arm64": "electron-builder --mac --arm64",
     "dist:mac:x64": "electron-builder --mac --x64",
     "dist:mac:all": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
     "dist:dir": "electron-builder --dir",
     "dist:mac:dir": "electron-builder --mac --dir",
     "pack": "electron-builder --dir"
@@ -106,6 +107,19 @@
       "shortcutName": "Clippy Vision",
       "uninstallDisplayName": "Clippy Vision",
       "include": "nsis/installer.nsh"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "artifactName": "ClippyVision-Linux-${arch}-${version}.${ext}"
     },
     "asar": true
   },

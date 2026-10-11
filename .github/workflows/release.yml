@@ -4,15 +4,23 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'electron-ui/**'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to build and attach installers to (e.g. v2.0.0)'
-        required: true
+        description: 'Release tag to build (e.g. v2.0.1). Leave empty for dry-run without creating a release.'
+        required: false
       include_macos:
-        description: 'Also build and upload macOS installers (only after Apple Silicon and Intel validation)'
+        description: 'Also build unsigned macOS installers (opt-in, manual validation required)'
         type: boolean
         default: false
+      include_linux:
+        description: 'Build Linux AppImage (enabled by default for tag pushes)'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -38,11 +46,19 @@ jobs:
         working-directory: electron-ui
         run: npm ci
 
-      - name: Sync app version from release tag
+      - name: Sync app version from release tag or dry-run
         working-directory: electron-ui
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # Dry-run: use package.json version with -dev suffix
+            TAG="v$(node -p "require('./package.json').version")-dev+${{ github.sha }}"
+            echo "::notice::Dry-run build (no release will be created): $TAG"
+          fi
           VERSION="${TAG#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
             echo "Invalid version derived from tag '$TAG' (got '$VERSION')"
@@ -50,17 +66,48 @@ jobs:
           fi
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           echo "Building Clippy Vision $VERSION (release tag $TAG)"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG=$TAG" >> $GITHUB_ENV
 
-      - name: Build Windows installer
+      - name: Build Windows installer (unsigned)
         working-directory: electron-ui
         run: npm run dist:win
 
+      - name: Smoke check Windows installer
+        shell: bash
+        working-directory: electron-ui/dist
+        run: |
+          echo "Checking Windows installer..."
+          INSTALLER=$(ls ClippyVision-Windows-Setup-*.exe 2>/dev/null | head -1)
+          if [[ -z "$INSTALLER" ]]; then
+            echo "ERROR: No Windows installer found"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$INSTALLER" 2>/dev/null || stat -f%z "$INSTALLER" 2>/dev/null)
+          echo "Found: $INSTALLER (${SIZE} bytes)"
+          if [[ $SIZE -lt 50000000 ]]; then
+            echo "ERROR: Installer too small (${SIZE} bytes, expected >50MB)"
+            exit 1
+          fi
+          echo "✓ Windows installer OK"
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: electron-ui/dist/*.exe
+          retention-days: 14
+
       - name: Upload Windows installer to release
+        # Only upload to release if we have a tag (not a dry-run or PR)
+        if: (github.event.inputs.tag != '' || github.ref_type == 'tag') && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             electron-ui/dist/*.exe
+          draft: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -83,11 +130,17 @@ jobs:
         working-directory: electron-ui
         run: npm ci
 
-      - name: Sync app version from release tag
+      - name: Sync app version from release tag or dry-run
         working-directory: electron-ui
         shell: bash
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            # Dry-run: use package.json version with -dev suffix
+            TAG="v$(node -p "require('./package.json').version")-dev+${{ github.sha }}"
+            echo "::notice::Dry-run build (no release will be created): $TAG"
+          fi
           VERSION="${TAG#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
             echo "Invalid version derived from tag '$TAG' (got '$VERSION')"
@@ -95,18 +148,126 @@ jobs:
           fi
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           echo "Building Clippy Vision $VERSION (release tag $TAG)"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG=$TAG" >> $GITHUB_ENV
 
-      - name: Build macOS installer
+      - name: Build macOS installer (unsigned, code signing disabled)
         working-directory: electron-ui
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run dist:mac
 
+      - name: Upload macOS installers artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: electron-ui/dist/*.dmg
+          retention-days: 14
+
       - name: Upload macOS installers to release
+        # Only upload to release if we have a tag (not a dry-run or PR)
+        if: github.event.inputs.tag != '' && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          files: |
+            electron-ui/dist/*.dmg
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    # Run on tag pushes, PRs (dry-run), or on workflow_dispatch if include_linux is true (default)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.include_linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: electron-ui
+        run: npm ci
+
+      - name: Sync app version from release tag or dry-run
+        working-directory: electron-ui
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # Dry-run: use package.json version with -dev suffix
+            TAG="v$(node -p "require('./package.json').version")-dev+${{ github.sha }}"
+            echo "::notice::Dry-run build (no release will be created): $TAG"
+          fi
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
+            echo "Invalid version derived from tag '$TAG' (got '$VERSION')"
+            exit 1
+          fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "Building Clippy Vision $VERSION (release tag $TAG)"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Build Linux AppImage (unsigned)
+        working-directory: electron-ui
+        run: npm run dist:linux
+
+      - name: Smoke check Linux AppImage
+        working-directory: electron-ui/dist
+        run: |
+          echo "Checking Linux AppImage..."
+          APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
+          if [[ -z "$APPIMAGE" ]]; then
+            echo "ERROR: No AppImage found"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$APPIMAGE")
+          echo "Found: $APPIMAGE (${SIZE} bytes)"
+          if [[ $SIZE -lt 50000000 ]]; then
+            echo "ERROR: AppImage too small (${SIZE} bytes, expected >50MB)"
+            exit 1
+          fi
+          
+          # Extract and verify main binary exists
+          chmod +x "$APPIMAGE"
+          ./"$APPIMAGE" --appimage-extract >/dev/null 2>&1
+          
+          if [[ ! -f "squashfs-root/clippy-vision" ]] && [[ ! -f "squashfs-root/AppRun" ]]; then
+            echo "ERROR: Main binary not found in extracted AppImage"
+            ls -la squashfs-root/ || true
+            exit 1
+          fi
+          
+          echo "✓ AppImage structure OK"
+          rm -rf squashfs-root
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: electron-ui/dist/*.AppImage
+          retention-days: 14
+
+      - name: Upload Linux AppImage to release
+        # Only upload to release if we have a tag (not a dry-run or PR)
+        if: (github.event.inputs.tag != '' || github.ref_type == 'tag') && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
-            electron-ui/dist/*.dmg
+            electron-ui/dist/*.AppImage
+          draft: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
