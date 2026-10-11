@@ -87,7 +87,7 @@ function createHardware({ paths, llmConfig, runCommand }) {
         const vramGb = process.platform === 'darwin'
             ? ramGb
             : Math.round(vramRaw * 10) / 10
-        const osOk = process.platform === 'win32' || process.platform === 'darwin'
+        const osOk = process.platform === 'win32' || process.platform === 'darwin' || process.platform === 'linux'
 
         const grades = {
             ram:  gradeResource(ramGb, requirements.ramGb, recommended.ramGb),
@@ -115,6 +115,7 @@ function createHardware({ paths, llmConfig, runCommand }) {
                     : osId === 'windows10' ? 'Windows 10'
                     : osId === 'macos-apple-silicon' ? 'macOS · Apple Silicon'
                     : osId === 'macos-intel' ? 'macOS · Intel'
+                    : osId === 'linux' ? 'Linux (supported, experimental)'
                     : osId,
             },
             mode: usesManagedOllama() ? 'ollama' : 'external',
