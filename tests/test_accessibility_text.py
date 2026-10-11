@@ -572,6 +572,134 @@ class TestLinuxAtSpiExtraction(unittest.TestCase):
 
     @pytest.mark.linux
     @patch("sys.platform", "linux")
+    def test_atspi_skips_insensitive_password_fields(self):
+        """AT-SPI skips password fields even when they are insensitive/disabled."""
+        from unittest.mock import MagicMock
+        
+        mock_pyatspi = MagicMock()
+        mock_pyatspi.STATE_ACTIVE = 1
+        mock_pyatspi.STATE_SENSITIVE = 2
+        mock_pyatspi.ROLE_FRAME = 10
+        mock_pyatspi.ROLE_PASSWORD_TEXT = 40
+        
+        # Mock insensitive/disabled password field (no STATE_SENSITIVE)
+        mock_password = MagicMock()
+        mock_password.getRole.return_value = mock_pyatspi.ROLE_PASSWORD_TEXT
+        mock_password.getState.return_value = set()  # Empty state set, no SENSITIVE
+        mock_password.name = "disabled_password_value"  # Should NOT be extracted
+        mock_password.childCount = 0
+        mock_password.queryText.side_effect = NotImplementedError
+        mock_password.queryValue.side_effect = NotImplementedError
+        
+        mock_app = MagicMock()
+        mock_app.getRole.return_value = mock_pyatspi.ROLE_FRAME
+        mock_app.getState.return_value = {mock_pyatspi.STATE_ACTIVE}
+        mock_app.childCount = 1
+        mock_app.getChildAtIndex.return_value = mock_password
+        mock_app.queryText.side_effect = NotImplementedError
+        mock_app.queryValue.side_effect = NotImplementedError
+        
+        mock_desktop = MagicMock()
+        mock_desktop.__iter__ = lambda self: iter([mock_app])
+        
+        mock_registry = MagicMock()
+        mock_registry.getDesktop.return_value = mock_desktop
+        mock_pyatspi.Registry = mock_registry
+        
+        with patch.dict("sys.modules", {"pyatspi": mock_pyatspi}):
+            if "core.accessibility_text" in sys.modules:
+                del sys.modules["core.accessibility_text"]
+            
+            from core import accessibility_text
+            
+            accessibility_text._linux_at_spi_warned = False
+            accessibility_text._linux_at_spi_unavailable = False
+            
+            text = accessibility_text._linux_text()
+            
+            # Even insensitive password fields should be skipped
+            assert "disabled_password_value" not in text
+
+    @pytest.mark.linux
+    @patch("sys.platform", "linux")
+    def test_atspi_respects_wall_clock_timeout(self):
+        """AT-SPI walk respects wall-clock timeout and returns partial results."""
+        from unittest.mock import MagicMock
+        import time
+        
+        mock_pyatspi = MagicMock()
+        mock_pyatspi.STATE_ACTIVE = 1
+        mock_pyatspi.STATE_SENSITIVE = 2
+        mock_pyatspi.ROLE_FRAME = 10
+        mock_pyatspi.ROLE_TEXT = 20
+        
+        # Mock fast accessible (returns immediately)
+        mock_fast = MagicMock()
+        mock_fast.getRole.return_value = mock_pyatspi.ROLE_TEXT
+        mock_fast.getState.return_value = {mock_pyatspi.STATE_SENSITIVE}
+        mock_fast.name = "Fast text"
+        mock_fast.childCount = 0
+        mock_fast.queryText.side_effect = NotImplementedError
+        mock_fast.queryValue.side_effect = NotImplementedError
+        
+        # Mock slow accessible that simulates a hung app
+        call_count = [0]
+        def slow_get_role():
+            call_count[0] += 1
+            if call_count[0] > 1:
+                # Simulate blocking on second call
+                time.sleep(3.0)  # Longer than _ATSPI_WALK_TIMEOUT_SECONDS (2.0s)
+            return mock_pyatspi.ROLE_TEXT
+        
+        mock_slow = MagicMock()
+        mock_slow.getRole.side_effect = slow_get_role
+        mock_slow.getState.return_value = {mock_pyatspi.STATE_SENSITIVE}
+        mock_slow.name = "Slow text that should timeout"
+        mock_slow.childCount = 0
+        
+        call_index = [0]
+        def get_child(index):
+            call_index[0] += 1
+            if call_index[0] == 1:
+                return mock_fast
+            return mock_slow
+        
+        mock_app = MagicMock()
+        mock_app.getRole.return_value = mock_pyatspi.ROLE_FRAME
+        mock_app.getState.return_value = {mock_pyatspi.STATE_ACTIVE}
+        mock_app.childCount = 2
+        mock_app.getChildAtIndex.side_effect = get_child
+        
+        mock_desktop = MagicMock()
+        mock_desktop.__iter__ = lambda self: iter([mock_app])
+        
+        mock_registry = MagicMock()
+        mock_registry.getDesktop.return_value = mock_desktop
+        mock_pyatspi.Registry = mock_registry
+        
+        with patch.dict("sys.modules", {"pyatspi": mock_pyatspi}):
+            if "core.accessibility_text" in sys.modules:
+                del sys.modules["core.accessibility_text"]
+            
+            from core import accessibility_text
+            
+            accessibility_text._linux_at_spi_warned = False
+            accessibility_text._linux_at_spi_unavailable = False
+            
+            start = time.time()
+            text = accessibility_text._linux_text()
+            elapsed = time.time() - start
+            
+            # Should complete quickly (within ~2.5s), not wait for the full 3s sleep
+            assert elapsed < 2.8, f"Walk took {elapsed}s, expected < 2.8s"
+            
+            # Should have collected the fast text before timing out
+            assert "Fast text" in text
+            # Should NOT have waited for slow text
+            assert "Slow text" not in text
+
+    @pytest.mark.linux
+    @patch("sys.platform", "linux")
     def test_atspi_handles_dbus_error(self):
         """AT-SPI handles D-Bus connection errors gracefully."""
         from unittest.mock import MagicMock

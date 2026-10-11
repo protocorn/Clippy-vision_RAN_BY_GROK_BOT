@@ -762,6 +762,9 @@ def _mac_text() -> str:
 _linux_at_spi_warned = False
 _linux_at_spi_unavailable = False
 
+# AT-SPI wall-clock budget to prevent hangs when querying stuck applications
+_ATSPI_WALK_TIMEOUT_SECONDS = 2.0
+
 
 def _linux_text() -> str:
     """Linux accessibility text extraction via AT-SPI.
@@ -784,11 +787,23 @@ def _linux_text() -> str:
     except ImportError:
         if not _linux_at_spi_warned:
             _linux_at_spi_warned = True
-            print("[accessibility_text] pyatspi not available; install python3-pyatspi for accessibility text extraction", file=sys.stderr)
+            print(
+                "[accessibility_text] pyatspi not available; install python3-pyatspi "
+                "for accessibility text extraction. If using a venv, recreate it with "
+                "--system-site-packages or ensure python3-gi is available.",
+                file=sys.stderr
+            )
         _linux_at_spi_unavailable = True
         return ""
     
     try:
+        # Set a short D-Bus timeout if supported to avoid blocking on hung apps
+        try:
+            if hasattr(pyatspi, 'set_timeout'):
+                pyatspi.set_timeout(500, 1000)  # 500ms sync, 1000ms async
+        except Exception:
+            pass
+        
         # Get the desktop (root of the accessibility tree)
         desktop = pyatspi.Registry.getDesktop(0)
         if desktop is None:
@@ -817,9 +832,11 @@ def _linux_text() -> str:
         if active_app is None:
             return ""
         
-        # Extract text from the active application's accessible tree
+        # Extract text from the active application's accessible tree with timeout
+        import time
+        start_time = time.monotonic()
         text_pieces = []
-        _walk_at_spi_tree(active_app, text_pieces, depth=0, max_nodes=MAX_UI_NODES)
+        _walk_at_spi_tree(active_app, text_pieces, depth=0, max_nodes=MAX_UI_NODES, start_time=start_time)
         
         return normalize_accessibility_text(*text_pieces)
     
@@ -836,13 +853,21 @@ def _linux_text() -> str:
         return ""
 
 
-def _walk_at_spi_tree(accessible, text_pieces: list[str], depth: int, max_nodes: int, visited: int = 0) -> int:
+def _walk_at_spi_tree(accessible, text_pieces: list[str], depth: int, max_nodes: int, visited: int = 0, start_time: float = 0) -> int:
     """Walk the AT-SPI accessibility tree and collect text content.
     
-    Returns the number of nodes visited so far.
+    Returns the number of nodes visited so far. Stops early if the wall-clock
+    budget is exceeded to prevent blocking on hung applications.
     """
     if visited >= max_nodes or depth >= MAX_UI_DEPTH:
         return visited
+    
+    # Check wall-clock timeout to avoid blocking on hung apps
+    if start_time > 0:
+        import time
+        elapsed = time.monotonic() - start_time
+        if elapsed > _ATSPI_WALK_TIMEOUT_SECONDS:
+            return visited
     
     if accessible is None:
         return visited
@@ -850,22 +875,16 @@ def _walk_at_spi_tree(accessible, text_pieces: list[str], depth: int, max_nodes:
     visited += 1
     
     try:
-        # Skip password fields
-        state_set = accessible.getState()
-        if state_set and hasattr(state_set, '__contains__'):
-            try:
-                import pyatspi
-                if pyatspi.STATE_SENSITIVE in state_set and _is_at_spi_password(accessible):
-                    return visited
-            except Exception:
-                pass
-        
-        # Get role to filter chrome elements
+        # Get role first to check for password fields before any text extraction
         role = None
         try:
             role = accessible.getRole()
         except Exception:
             pass
+        
+        # Skip password fields unconditionally (regardless of state)
+        if role is not None and _is_at_spi_password_role(role):
+            return visited
         
         # Skip certain chrome/UI roles (similar to Windows implementation)
         if role is not None and _is_at_spi_chrome_role(role):
@@ -886,7 +905,7 @@ def _walk_at_spi_tree(accessible, text_pieces: list[str], depth: int, max_nodes:
             for i in range(min(child_count, 50)):  # Limit children per node
                 try:
                     child = accessible.getChildAtIndex(i)
-                    visited = _walk_at_spi_tree(child, text_pieces, depth + 1, max_nodes, visited)
+                    visited = _walk_at_spi_tree(child, text_pieces, depth + 1, max_nodes, visited, start_time)
                     if visited >= max_nodes:
                         break
                 except Exception:
@@ -900,12 +919,20 @@ def _walk_at_spi_tree(accessible, text_pieces: list[str], depth: int, max_nodes:
     return visited
 
 
+def _is_at_spi_password_role(role) -> bool:
+    """Check if a role is a password field. Check role only, not state."""
+    try:
+        import pyatspi
+        return role == pyatspi.ROLE_PASSWORD_TEXT
+    except Exception:
+        return False
+
+
 def _is_at_spi_password(accessible) -> bool:
     """Check if an accessible is a password field."""
     try:
-        import pyatspi
         role = accessible.getRole()
-        return role == pyatspi.ROLE_PASSWORD_TEXT
+        return _is_at_spi_password_role(role)
     except Exception:
         return False
 
