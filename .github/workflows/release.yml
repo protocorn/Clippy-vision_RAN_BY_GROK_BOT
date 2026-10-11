@@ -371,7 +371,7 @@ jobs:
       - name: Launch test Linux AppImage under Xvfb
         working-directory: electron-ui/dist
         run: |
-          echo "Installing Xvfb, FUSE, and screenshot tools..."
+          echo "Installing Xvfb, FUSE, and diagnostic tools..."
           sudo apt-get update -qq
           sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl lsof iproute2
           
@@ -392,10 +392,9 @@ jobs:
           echo "AppImage PID: $APP_PID"
           echo "Waiting up to 90 seconds for startup..."
           
-          # Monitor for 90 seconds, checking for backend and window
-          BACKEND_PORT_ANNOUNCED=false
+          # Monitor for 90 seconds, checking for backend HTTP and window
           BACKEND_PORT=""
-          BACKEND_LISTENING=false
+          BACKEND_HTTP_OK=false
           WINDOW_FOUND=false
           
           for i in {1..90}; do
@@ -409,28 +408,47 @@ jobs:
             fi
             
             # Check log for backend port announcement
-            if [ "$BACKEND_PORT_ANNOUNCED" = false ]; then
+            if [ -z "$BACKEND_PORT" ]; then
               PORT_LINE=$(grep -o "\[api\] port=[0-9]*" "$LOG_FILE" 2>/dev/null | head -1)
               if [ -n "$PORT_LINE" ]; then
                 BACKEND_PORT=$(echo "$PORT_LINE" | grep -o "[0-9]\+")
                 if [ -n "$BACKEND_PORT" ]; then
-                  BACKEND_PORT_ANNOUNCED=true
                   echo "✓ Backend port announced: $BACKEND_PORT at ${i}s"
+                  
+                  # Show diagnostic info when port is announced
+                  echo "=== Diagnostics at ${i}s (port announced) ==="
+                  echo "--- Listening TCP ports (ss -tlnp) ---"
+                  ss -tlnp 2>&1 | grep -E "State|$BACKEND_PORT|127.0.0.1" || echo "(no matches)"
+                  echo "--- Python processes (ps -ef | grep python) ---"
+                  ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
+                  echo "=== End diagnostics ==="
                 fi
               fi
             fi
             
-            # If port announced, check if it's listening (with a small delay)
-            if [ "$BACKEND_PORT_ANNOUNCED" = true ] && [ "$BACKEND_LISTENING" = false ]; then
-              # Give it 2 more seconds to start listening after announcement
-              sleep 2
-              if ss -tln | grep -q ":$BACKEND_PORT "; then
-                BACKEND_LISTENING=true
-                echo "✓ Backend listening on port $BACKEND_PORT at ${i}s"
-              elif lsof -i ":$BACKEND_PORT" > /dev/null 2>&1; then
-                BACKEND_LISTENING=true
-                echo "✓ Backend listening on port $BACKEND_PORT at ${i}s (detected via lsof)"
-              fi
+            # If port known, try HTTP health check
+            if [ -n "$BACKEND_PORT" ] && [ "$BACKEND_HTTP_OK" = false ]; then
+              # Try both 127.0.0.1 and localhost
+              for host in "127.0.0.1" "localhost"; do
+                HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "http://${host}:${BACKEND_PORT}/health" 2>&1 || echo "")
+                HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
+                HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+                
+                if [ "$HTTP_CODE" = "200" ]; then
+                  BACKEND_HTTP_OK=true
+                  echo "✓ Backend HTTP responding on ${host}:${BACKEND_PORT} at ${i}s"
+                  echo "  Response: $HTTP_BODY"
+                  
+                  # Show diagnostic info on success
+                  echo "=== Diagnostics at ${i}s (HTTP success) ==="
+                  echo "--- Listening TCP ports (ss -tlnp) ---"
+                  ss -tlnp 2>&1 | grep -E "State|$BACKEND_PORT" || echo "(no matches)"
+                  echo "--- Python processes ---"
+                  ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
+                  echo "=== End diagnostics ==="
+                  break
+                fi
+              done
             fi
             
             # Check for Electron window
@@ -442,13 +460,25 @@ jobs:
             fi
             
             # Exit early if all verified
-            if [ "$BACKEND_LISTENING" = true ] && [ "$WINDOW_FOUND" = true ]; then
+            if [ "$BACKEND_HTTP_OK" = true ] && [ "$WINDOW_FOUND" = true ]; then
               echo "✓ All components verified, continuing monitoring..."
               break
             fi
             
             sleep 1
           done
+          
+          # Show mid-point diagnostics if backend not responding yet
+          if [ "$BACKEND_HTTP_OK" = false ] && [ -n "$BACKEND_PORT" ]; then
+            echo "=== Mid-point diagnostics (HTTP not responding after 90s) ==="
+            echo "--- Listening TCP ports (ss -tlnp) ---"
+            ss -tlnp 2>&1 | head -30
+            echo "--- Python processes ---"
+            ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
+            echo "--- Recent log lines ---"
+            tail -20 "$LOG_FILE"
+            echo "=== End mid-point diagnostics ==="
+          fi
           
           # Continue monitoring to ensure stability (30 more seconds)
           echo "Monitoring stability for 30 more seconds..."
@@ -459,18 +489,68 @@ jobs:
               kill $XVFB_PID 2>/dev/null || true
               exit 1
             fi
+            
+            # Retry HTTP if not yet successful
+            if [ -n "$BACKEND_PORT" ] && [ "$BACKEND_HTTP_OK" = false ]; then
+              for host in "127.0.0.1" "localhost"; do
+                HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "http://${host}:${BACKEND_PORT}/health" 2>&1 || echo "")
+                HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
+                HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+                
+                if [ "$HTTP_CODE" = "200" ]; then
+                  BACKEND_HTTP_OK=true
+                  STABILITY_ELAPSED=$((90 + i))
+                  echo "✓ Backend HTTP responding on ${host}:${BACKEND_PORT} at ${STABILITY_ELAPSED}s"
+                  echo "  Response: $HTTP_BODY"
+                  break
+                fi
+              done
+            fi
+            
             sleep 1
           done
           
           echo "✓ AppImage stable for 120 seconds total"
           
+          # Final diagnostics
+          echo "=== Final diagnostics ==="
+          echo "--- All listening TCP ports (ss -tlnp) ---"
+          ss -tlnp 2>&1 | head -40
+          echo "--- Python processes ---"
+          ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
+          echo "=== End final diagnostics ==="
+          
           # Verify required components started
-          # Accept port announcement even if we couldn't verify listening
-          # (CI environment may have networking restrictions)
-          if [ "$BACKEND_PORT_ANNOUNCED" = false ]; then
+          if [ -z "$BACKEND_PORT" ]; then
             echo "ERROR: Backend port never announced in log"
             echo "=== Application log ==="
             cat "$LOG_FILE"
+            kill $APP_PID 2>/dev/null || true
+            kill $XVFB_PID 2>/dev/null || true
+            exit 1
+          fi
+          
+          if [ "$BACKEND_HTTP_OK" = false ]; then
+            echo "ERROR: Backend HTTP health check never succeeded"
+            echo "  Port announced: $BACKEND_PORT"
+            echo "  Tried: http://127.0.0.1:${BACKEND_PORT}/health and http://localhost:${BACKEND_PORT}/health"
+            echo ""
+            echo "=== Investigation: Backend bundle and startup ==="
+            
+            # Check if backend files are in the AppImage
+            echo "--- Extracting AppImage to check bundle ---"
+            ./"$APPIMAGE" --appimage-extract > /dev/null 2>&1 || true
+            if [ -d "squashfs-root" ]; then
+              echo "Backend files in bundle:"
+              find squashfs-root -name "api_server.py" -o -name "core" -type d | head -5
+              echo "Python in bundle:"
+              find squashfs-root -name "python*" -type f | head -5
+            fi
+            
+            echo ""
+            echo "=== Full application log ==="
+            cat "$LOG_FILE"
+            
             kill $APP_PID 2>/dev/null || true
             kill $XVFB_PID 2>/dev/null || true
             exit 1
@@ -483,12 +563,6 @@ jobs:
             kill $APP_PID 2>/dev/null || true
             kill $XVFB_PID 2>/dev/null || true
             exit 1
-          fi
-          
-          # Report listening status (warning only, not failure)
-          if [ "$BACKEND_LISTENING" = false ]; then
-            echo "⚠ Warning: Could not verify port $BACKEND_PORT is listening (may be CI network restrictions)"
-            echo "Port was announced in logs, which indicates backend started"
           fi
           
           # Capture screenshot
@@ -510,13 +584,9 @@ jobs:
           
           echo ""
           echo "✓ Launch test completed successfully"
-          echo "  - Backend port announced: $BACKEND_PORT"
-          if [ "$BACKEND_LISTENING" = true ]; then
-            echo "  - Backend port verified listening"
-          else
-            echo "  - Backend port listening check inconclusive"
-          fi
-          echo "  - Electron window verified"
+          echo "  - Backend port: $BACKEND_PORT"
+          echo "  - Backend HTTP health check: PASSED (200 OK)"
+          echo "  - Electron window: verified"
           echo "  - Stable for 120 seconds"
 
       - name: Upload launch test artifacts
