@@ -140,9 +140,11 @@ jobs:
           Write-Host "  Installed exe size: $exeSize bytes"
           Write-Host "  Install location: $installLocation"
           
-          # Launch test (30 seconds)
-          Write-Host "Launching application (30 second test)..."
-          $process = Start-Process -FilePath $installedExe -PassThru -WindowStyle Hidden -ErrorAction Stop
+          # Launch test (60 seconds with HTTP check)
+          Write-Host "Launching application (60 second test with HTTP backend check)..."
+          $launchLog = "$localInstallPath\launch-test.log"
+          
+          $process = Start-Process -FilePath $installedExe -PassThru -WindowStyle Hidden -RedirectStandardOutput $launchLog -RedirectStandardError "$launchLog.err" -ErrorAction Stop
           
           if (-not $process) {
             Write-Error "Failed to start process"
@@ -152,34 +154,70 @@ jobs:
           
           Write-Host "  Main process PID: $($process.Id)"
           
-          # Monitor for 30 seconds
-          $backendFound = $false
-          for ($i = 1; $i -le 30; $i++) {
+          # Parse backend port from log
+          $backendPort = $null
+          $backendHttpOk = $false
+          
+          # Monitor for 60 seconds
+          for ($i = 1; $i -le 60; $i++) {
             Start-Sleep -Seconds 1
             
             # Check if main process exited
             if ($process.HasExited) {
               Write-Error "Process exited after $i seconds (exit code: $($process.ExitCode))"
               "Process crashed after ${i}s (code: $($process.ExitCode))" | Out-File $installLog
+              if (Test-Path $launchLog) {
+                Get-Content $launchLog | Write-Host
+              }
               exit 1
             }
             
-            # Check for Python backend process
-            if (-not $backendFound) {
-              $pythonProcs = Get-Process -Name python* -ErrorAction SilentlyContinue | Where-Object {
-                $_.Parent.Id -eq $process.Id -or $_.CommandLine -like "*api_server*"
+            # Try to read port from log
+            if (($null -eq $backendPort) -and (Test-Path $launchLog)) {
+              $logContent = Get-Content $launchLog -Raw -ErrorAction SilentlyContinue
+              if ($logContent -match '\[api\] port=(\d+)') {
+                $backendPort = $matches[1]
+                Write-Host "✓ Backend port announced: $backendPort at ${i}s"
               }
-              if ($pythonProcs) {
-                Write-Host "✓ Python backend process detected at ${i}s"
-                $backendFound = $true
+            }
+            
+            # Try HTTP health check if port known
+            if (($null -ne $backendPort) -and (-not $backendHttpOk)) {
+              foreach ($host in @("127.0.0.1", "localhost")) {
+                try {
+                  $response = Invoke-WebRequest -Uri "http://${host}:${backendPort}/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
+                  if ($response.StatusCode -eq 200) {
+                    $backendHttpOk = $true
+                    Write-Host "✓ Backend HTTP responding on ${host}:${backendPort} at ${i}s"
+                    Write-Host "  Response: $($response.Content)"
+                    break
+                  }
+                } catch {
+                  # Connection failed, continue
+                }
               }
+            }
+            
+            # Show progress every 10 seconds
+            if ($i % 10 -eq 0) {
+              Write-Host "  ...${i}s elapsed (process alive, backend HTTP: $(if ($backendHttpOk) {'OK'} else {'not yet'}))"
             }
           }
           
-          Write-Host "✓ Process still running after 30 seconds"
+          Write-Host "✓ Process still running after 60 seconds"
           
-          if (-not $backendFound) {
-            Write-Warning "Python backend process not detected (may be in different process tree)"
+          # Verify backend status
+          if ($null -eq $backendPort) {
+            Write-Warning "Backend port was never announced in logs"
+            Write-Host "=== Launch log ==="
+            if (Test-Path $launchLog) {
+              Get-Content $launchLog | Write-Host
+            }
+          } elseif (-not $backendHttpOk) {
+            Write-Warning "Backend port announced ($backendPort) but HTTP health check never succeeded"
+            Write-Host "This likely means setup wizard blocked (Windows should pass, but logging for comparison with Linux)"
+          } else {
+            Write-Host "✓ Backend HTTP health check PASSED"
           }
           
           # Cleanup
@@ -187,16 +225,16 @@ jobs:
           
           # Write summary
           "Installation: $installLocation" | Out-File $installLog
-          "Process ran for 30 seconds" | Out-File $installLog -Append
-          if ($backendFound) {
-            "Backend process detected" | Out-File $installLog -Append
-          }
+          "Process ran for 60 seconds" | Out-File $installLog -Append
+          "Backend port: $(if ($null -ne $backendPort) {$backendPort} else {'not announced'})" | Out-File $installLog -Append
+          "Backend HTTP: $(if ($backendHttpOk) {'PASS'} else {'FAIL or not reached'})" | Out-File $installLog -Append
           
           Write-Host ""
           Write-Host "✓ Silent install test completed"
           Write-Host "  - Installed to: $installLocation"
-          Write-Host "  - Process stable for 30s"
-          Write-Host "  - Backend process: $(if ($backendFound) { 'detected' } else { 'not detected' })"
+          Write-Host "  - Process stable for 60s"
+          Write-Host "  - Backend port: $(if ($null -ne $backendPort) {$backendPort} else {'not announced'})"
+          Write-Host "  - Backend HTTP: $(if ($backendHttpOk) {'PASS (200 OK)'} else {'FAIL or not reached'})"
 
       - name: Upload Windows test artifacts
         if: always()
