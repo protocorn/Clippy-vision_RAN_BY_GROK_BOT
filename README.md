@@ -61,6 +61,21 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | System RAM | 8 GB | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
+| **Python runtime** | **Python 3.11+** (system installation, not bundled) | **Python 3.12** |
+
+**Python requirement:** Clippy Vision requires a system Python 3.11 or later installation. Python is NOT bundled in the installer.
+
+- **Windows:** The setup wizard will attempt to install Python 3.11 automatically via winget if not found. You can also install manually from [python.org](https://www.python.org/downloads/) and ensure it's on your PATH.
+- **Linux:** Install Python 3.11+ via your package manager: `sudo apt install python3.11 python3-pip` (Ubuntu/Debian) or equivalent.
+- **macOS:** The setup wizard will attempt to install Python via Homebrew if not found and Homebrew is installed. You can also install manually from [python.org](https://www.python.org/downloads/) or Homebrew: `brew install python@3.11`.
+
+**Advanced:** To use a specific Python interpreter or virtual environment, set the `CLIPPY_PYTHON` environment variable to the full path of your `python` or `python3` executable before launching Clippy. For example:
+```bash
+export CLIPPY_PYTHON=/path/to/venv/bin/python3   # Linux/macOS
+set CLIPPY_PYTHON=C:\path\to\python.exe          # Windows
+```
+
+When Python is missing, the setup wizard will show an error message asking you to install Python 3.11+ and ensure it's on your PATH, then retry setup.
 
 **Linux support (experimental):** Capture runs with limited features. On **X11**, screenshots use `mss` (optional crop to the focused window via `xdotool`). On **native Wayland**, screenshots are skipped until xdg-desktop-portal support lands (blank XWayland grabs are not stored); wlroots users can install `grim` for captures. Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text and installers are not implemented yet.
 

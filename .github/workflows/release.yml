@@ -95,7 +95,35 @@ jobs:
         shell: pwsh
         working-directory: electron-ui/dist
         run: |
-          Write-Host "Running silent installation..."
+          Write-Host "=== Installing Python 3.11 and dependencies ==="
+          
+          # Install Python 3.11
+          Write-Host "Installing Python 3.11..."
+          $pythonInstaller = "python-3.11.9-amd64.exe"
+          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.11.9/$pythonInstaller" -OutFile $pythonInstaller
+          Start-Process -FilePath $pythonInstaller -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1" -Wait -NoNewWindow
+          
+          # Refresh PATH
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          
+          # Verify Python installation
+          $pythonExe = "python"
+          & $pythonExe --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Python installation failed"
+            exit 1
+          }
+          
+          # Install requirements
+          Write-Host "Installing Python dependencies..."
+          & $pythonExe -m pip install --upgrade pip
+          & $pythonExe -m pip install -r ..\..\requirements.txt
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to install Python dependencies"
+            exit 1
+          }
+          
+          Write-Host "=== Running silent installation ==="
           $installer = Get-ChildItem -Filter "ClippyVision-Windows-Setup-*.exe" | Select-Object -First 1
           if (-not $installer) {
             Write-Error "No installer found"
@@ -139,6 +167,51 @@ jobs:
           $exeSize = (Get-Item $installedExe).Length
           Write-Host "  Installed exe size: $exeSize bytes"
           Write-Host "  Install location: $installLocation"
+          
+          # Pre-seed setup to bypass wizard
+          Write-Host "Pre-seeding setup configuration..."
+          $appDataDir = "$localAppData\Clippy Vision\data"
+          New-Item -Path $appDataDir -ItemType Directory -Force | Out-Null
+          
+          # Create setup_complete.json
+          $setupComplete = @{
+            version = "2.1.0"
+            completedAt = (Get-Date).ToUniversalTime().ToString("o")
+          }
+          $setupComplete | ConvertTo-Json | Out-File "$appDataDir\setup_complete.json" -Encoding UTF8
+          
+          # Create llm_config.json with stub HTTP endpoint (bypass Ollama requirement)
+          # The backend preflight will check this URL instead of requiring Ollama
+          $llmConfig = @{
+            provider = "ollama"
+            base_url = "http://127.0.0.1:11555"
+            api_key = ""
+            chat_model = "test-model"
+            embedding_model = "nomic-embed-text"
+          }
+          $llmConfig | ConvertTo-Json | Out-File "$appDataDir\llm_config.json" -Encoding UTF8
+          
+          # Start a minimal stub server on 11555 to satisfy preflight checks
+          Write-Host "Starting stub LLM API server on port 11555..."
+          $stubServer = Start-Job -ScriptBlock {
+            $listener = New-Object System.Net.HttpListener
+            $listener.Prefixes.Add("http://127.0.0.1:11555/")
+            $listener.Start()
+            Write-Host "Stub server listening on http://127.0.0.1:11555/"
+            while ($listener.IsListening) {
+              $context = $listener.GetContext()
+              $response = $context.Response
+              $response.StatusCode = 200
+              $response.ContentType = "application/json"
+              $buffer = [System.Text.Encoding]::UTF8.GetBytes('{"status":"ok"}')
+              $response.ContentLength64 = $buffer.Length
+              $response.OutputStream.Write($buffer, 0, $buffer.Length)
+              $response.OutputStream.Close()
+            }
+          }
+          Start-Sleep -Seconds 2
+          
+          Write-Host "✓ Setup pre-seeded (bypasses wizard, stub LLM API on 11555)"
           
           # Launch test (60 seconds with HTTP check)
           Write-Host "Launching application (60 second test with HTTP backend check)..."
@@ -206,16 +279,37 @@ jobs:
           
           Write-Host "✓ Process still running after 60 seconds"
           
-          # Verify backend status
+          # Stop stub server
+          Stop-Job -Job $stubServer -ErrorAction SilentlyContinue
+          Remove-Job -Job $stubServer -ErrorAction SilentlyContinue
+          
+          # Verify backend status - FAIL HARD if HTTP check never succeeded
           if ($null -eq $backendPort) {
-            Write-Warning "Backend port was never announced in logs"
+            Write-Error "ERROR: Backend port was never announced in logs"
             Write-Host "=== Launch log ==="
             if (Test-Path $launchLog) {
               Get-Content $launchLog | Write-Host
             }
+            if (Test-Path "$launchLog.err") {
+              Write-Host "=== Backend stderr ==="
+              Get-Content "$launchLog.err" | Write-Host
+            }
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            exit 1
           } elseif (-not $backendHttpOk) {
-            Write-Warning "Backend port announced ($backendPort) but HTTP health check never succeeded"
-            Write-Host "This likely means setup wizard blocked (Windows should pass, but logging for comparison with Linux)"
+            Write-Error "ERROR: Backend HTTP health check FAILED"
+            Write-Error "  Port announced: $backendPort"
+            Write-Error "  HTTP /health never returned 200 OK"
+            Write-Host "=== Launch log ==="
+            if (Test-Path $launchLog) {
+              Get-Content $launchLog | Write-Host
+            }
+            if (Test-Path "$launchLog.err") {
+              Write-Host "=== Backend stderr ==="
+              Get-Content "$launchLog.err" | Write-Host
+            }
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            exit 1
           } else {
             Write-Host "✓ Backend HTTP health check PASSED"
           }
@@ -409,12 +503,65 @@ jobs:
       - name: Launch test Linux AppImage under Xvfb
         working-directory: electron-ui/dist
         run: |
-          echo "Installing Xvfb, FUSE, and diagnostic tools..."
+          echo "=== Installing system dependencies ==="
+          echo "Installing Xvfb, FUSE, Python 3.11, and diagnostic tools..."
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl lsof iproute2
+          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl lsof iproute2 \
+            software-properties-common python3.11 python3.11-venv python3-pip
           
+          # Verify Python 3.11
+          python3.11 --version
+          
+          # Install Python dependencies
+          echo "Installing Python dependencies..."
+          python3.11 -m pip install --upgrade pip
+          python3.11 -m pip install -r ../../requirements.txt
+          
+          echo "=== Pre-seeding setup configuration ==="
           APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
           chmod +x "$APPIMAGE"
+          
+          # Pre-seed setup files in expected location
+          CONFIG_DIR="$HOME/.config/Clippy Vision/data"
+          mkdir -p "$CONFIG_DIR"
+          
+          # Create setup_complete.json
+          cat > "$CONFIG_DIR/setup_complete.json" << 'EOF'
+{
+  "version": "2.1.0",
+  "completedAt": "2026-10-11T17:00:00.000Z"
+}
+EOF
+          
+          # Create llm_config.json with stub HTTP endpoint (bypass Ollama requirement)
+          cat > "$CONFIG_DIR/llm_config.json" << 'EOF'
+{
+  "provider": "ollama",
+  "base_url": "http://127.0.0.1:11555",
+  "api_key": "",
+  "chat_model": "test-model",
+  "embedding_model": "nomic-embed-text"
+}
+EOF
+          
+          # Start stub LLM API server to satisfy preflight checks
+          echo "Starting stub LLM API server on port 11555..."
+          python3.11 -m http.server 11555 --bind 127.0.0.1 > /dev/null 2>&1 &
+          STUB_PID=$!
+          sleep 1
+          
+          # Test stub server
+          if curl -s http://127.0.0.1:11555/ > /dev/null; then
+            echo "✓ Stub server running on port 11555"
+          else
+            echo "ERROR: Stub server failed to start"
+            exit 1
+          fi
+          
+          # Set CLIPPY_PYTHON to use our installed Python 3.11
+          export CLIPPY_PYTHON="python3.11"
+          
+          echo "=== Starting Xvfb and AppImage ==="
           
           echo "Starting Xvfb on :99..."
           Xvfb :99 -screen 0 1024x768x24 &
@@ -422,9 +569,10 @@ jobs:
           export DISPLAY=:99
           sleep 2
           
-          echo "Launching AppImage..."
+          echo "Launching AppImage with CLIPPY_PYTHON=$CLIPPY_PYTHON..."
           LOG_FILE="launch-test.log"
-          ./"$APPIMAGE" > "$LOG_FILE" 2>&1 &
+          STDERR_FILE="launch-test.stderr"
+          ./"$APPIMAGE" > "$LOG_FILE" 2> "$STDERR_FILE" &
           APP_PID=$!
           
           echo "AppImage PID: $APP_PID"
@@ -573,6 +721,13 @@ jobs:
             echo "  Port announced: $BACKEND_PORT"
             echo "  Tried: http://127.0.0.1:${BACKEND_PORT}/health and http://localhost:${BACKEND_PORT}/health"
             echo ""
+            echo "=== Setup bypass configuration ==="
+            echo "  - setup_complete.json: pre-seeded"
+            echo "  - llm_config.json: base_url=http://127.0.0.1:11555 (stub server)"
+            echo "  - CLIPPY_PYTHON: $CLIPPY_PYTHON"
+            echo "  - Python deps: installed via requirements.txt"
+            echo "  - Ollama check: bypassed (external base_url)"
+            echo ""
             echo "=== Investigation: Backend bundle and startup ==="
             
             # Check if backend files are in the AppImage
@@ -589,6 +744,13 @@ jobs:
             echo "=== Full application log ==="
             cat "$LOG_FILE"
             
+            if [ -f "$STDERR_FILE" ]; then
+              echo ""
+              echo "=== Backend stderr ==="
+              cat "$STDERR_FILE"
+            fi
+            
+            kill $STUB_PID 2>/dev/null || true
             kill $APP_PID 2>/dev/null || true
             kill $XVFB_PID 2>/dev/null || true
             exit 1
@@ -617,6 +779,7 @@ jobs:
           tail -100 "$LOG_FILE"
           
           # Cleanup
+          kill $STUB_PID 2>/dev/null || true
           kill $APP_PID 2>/dev/null || true
           kill $XVFB_PID 2>/dev/null || true
           
@@ -634,6 +797,7 @@ jobs:
           name: linux-launch-test
           path: |
             electron-ui/dist/launch-test.log
+            electron-ui/dist/launch-test.stderr
             electron-ui/dist/launch-screenshot.png
           retention-days: 14
 

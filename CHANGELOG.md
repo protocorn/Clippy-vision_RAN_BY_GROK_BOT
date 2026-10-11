@@ -49,13 +49,12 @@ First release of the Grok Bot fork. Adds experimental Linux support, expands bro
   - Linux with integrated GPU uses system RAM for VRAM grading
 
 ### Known Issues
-- Linux + Windows backends require interactive setup wizard completion before starting
+- Backend requires interactive setup wizard completion before starting on first launch
   - Setup wizard fix (e73b4f7): Linux now passes OS check, can proceed through setup ✅
-  - Backend spawn is gated on `setup_complete.json` (normal first-run behavior)
-  - CI HTTP test fails because automated test doesn't complete 10+ minute setup flow
-  - This is expected desktop app behavior, not a packaging bug
-  - Users must: (1) Complete setup wizard, (2) Download Ollama models, (3) Wait for Python deps
-  - After setup completes once, backend auto-starts on subsequent launches
+  - Backend spawn is gated on `setup_complete.json`
+  - Setup includes: Python 3.11+ installation, Ollama models, Python dependencies
+  - After first-run setup completes, backend auto-starts on subsequent launches
+- Python runtime not bundled - requires system Python 3.11+ (see README.md)
 - Unsigned installers trigger SmartScreen/Gatekeeper warnings on first install
 
 ## [2.0.0] - 2024-10-09
