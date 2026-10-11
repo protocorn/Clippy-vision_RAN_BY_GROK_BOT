@@ -119,13 +119,7 @@
       ],
       "icon": "assets/icon.png",
       "category": "Utility",
-      "artifactName": "ClippyVision-Linux-${arch}-${version}.${ext}",
-      "desktop": {
-        "Name": "Clippy Vision",
-        "Comment": "Local AI desktop companion with screen awareness",
-        "Categories": "Utility;Office;",
-        "StartupWMClass": "clippy-vision"
-      }
+      "artifactName": "ClippyVision-Linux-${arch}-${version}.${ext}"
     },
     "asar": true
   },
