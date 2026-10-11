@@ -30,10 +30,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
           pip install -r requirements.txt
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq xvfb x11-xserver-utils xterm
-          fi
+      
+      - name: Install Linux Xvfb test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb x11-xserver-utils xterm
       
       - name: List installed packages
         run: pip list
