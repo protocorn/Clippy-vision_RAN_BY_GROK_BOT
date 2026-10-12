@@ -250,3 +250,61 @@ def test_chat_non_stream_saves_both_turns(client):
         calls = mock_save.call_args_list
         assert calls[0][0] == ("test456", "user", "Question")
         assert calls[1][0] == ("test456", "assistant", "Answer")
+
+
+def _sse_events(response_text: str) -> list[dict]:
+    events = []
+    for line in response_text.split("\n"):
+        if line.startswith("data: "):
+            try:
+                events.append(json.loads(line[6:]))
+            except json.JSONDecodeError:
+                pass
+    return events
+
+
+def test_chat_model_missing(client):
+    """Test /chat returns a clear 503 when the chat model is not installed."""
+    from core.ollama_client import OllamaError
+
+    with patch("core.chat_context.build_chat_messages") as mock_build, \
+         patch("core.llm_gateway.gateway.chat") as mock_chat:
+
+        mock_build.return_value = [{"role": "user", "content": "Test"}]
+        mock_chat.side_effect = OllamaError(
+            "ollama chat failed — HTTP 404: model 'qwen3:8b' not found"
+        )
+
+        response = client.post(
+            "/chat",
+            json={"message": "Test", "conversation_id": "test123"},
+        )
+
+        assert response.status_code == 503
+        assert "not installed" in response.json()["detail"].lower()
+        assert "HTTP 404" not in response.json()["detail"]
+
+
+def test_chat_stream_model_missing(client):
+    """Test /chat/stream emits a user-facing model-missing error event."""
+    from core.ollama_client import OllamaError
+
+    with patch("core.chat_context.build_chat_messages") as mock_build, \
+         patch("core.llm_gateway.gateway.chat_stream") as mock_stream:
+
+        mock_build.return_value = [{"role": "user", "content": "Test"}]
+        mock_stream.side_effect = OllamaError(
+            "ollama chat failed — HTTP 404: model 'qwen3:8b' not found"
+        )
+
+        response = client.post(
+            "/chat/stream",
+            json={"message": "Test", "conversation_id": "test123"},
+        )
+
+        assert response.status_code == 200
+        error_events = [e for e in _sse_events(response.text) if e.get("type") == "error"]
+        assert error_events
+        assert error_events[0].get("model_missing") is True
+        assert "not installed" in error_events[0]["message"].lower()
+        assert error_events[0].get("ollama_unavailable") is not True

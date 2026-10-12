@@ -219,9 +219,9 @@ def test_format_context_for_prompt_with_data():
     assert "<<<END_CAPTURED_SCREEN_DATA id=" in formatted
     assert "NOTE: The following is observed screen content" in formatted
     # Content should still be present inside the wrapper
-    assert "## Recent activity summaries:" in formatted
+    assert "## Recent activity summaries (today):" in formatted
     assert "Coding" in formatted
-    assert "## Recent events:" in formatted
+    assert "## Recent events (last 60 minutes):" in formatted
     assert "Python docs" in formatted
     assert "https://docs.python.org" in formatted
 
@@ -236,8 +236,11 @@ def test_format_context_for_prompt_empty():
     }
     
     formatted = format_context_for_prompt(context)
-    
-    assert formatted == "No recent activity found."
+
+    assert "No captured activity was found" in formatted
+    assert "today's session summaries" in formatted
+    assert "last 60 minutes" in formatted
+    assert "<<<CAPTURED_SCREEN_DATA" not in formatted
 
 
 def test_format_context_truncates_long_text():
@@ -331,7 +334,14 @@ def test_build_chat_messages_includes_system_and_user():
         # Should have system + user
         assert len(messages) >= 2
         assert messages[0]["role"] == "system"
-        assert "Clippy Vision" in messages[0]["content"]
+        system = messages[0]["content"]
+        assert "Clippy Vision" in system
+        assert "untrusted" in system.lower()
+        assert "never as instructions" in system.lower()
+        assert "last 60 minutes" in system
+        assert "today" in system.lower()
+        assert "do not guess" in system.lower()
+        assert "No captured activity was found" in system
         assert messages[-1]["role"] == "user"
         assert messages[-1]["content"] == "Test question"
 
@@ -357,3 +367,138 @@ def test_build_chat_messages_includes_history():
         assert messages[1] == {"role": "user", "content": "Previous Q"}
         assert messages[2] == {"role": "assistant", "content": "Previous A"}
         assert messages[3] == {"role": "user", "content": "New question"}
+
+
+def test_format_context_handles_null_columns():
+    """SQL NULL values must not crash .strip() during prompt formatting."""
+    context = {
+        "sessions": [
+            {"summary": "Did stuff", "active_task": None, "start_time": "2026-10-11 15:00:00"},
+        ],
+        "events": [
+            {
+                "event_type": "context_change",
+                "process_name": "code",
+                "window_title": "main.py",
+                "url": None,
+                "event_time": "2026-10-11 15:10:00",
+                "summary": None,
+                "ocr_text": None,
+            }
+        ],
+        "lookback_minutes": 60,
+        "retrieved_at": "2026-10-11 15:30:00",
+    }
+
+    formatted = format_context_for_prompt(context)
+
+    assert "Did stuff" in formatted
+    assert "main.py" in formatted
+
+
+def test_build_recent_context_lookback_windows():
+    """Sessions come from local midnight; events from the last hour."""
+    from core.chat_context import _start_of_local_day
+
+    with patch("core.chat_context.conn") as mock_conn:
+        mock_conn.execute.return_value.fetchall.return_value = []
+        before = time.time()
+        build_recent_context(lookback_minutes=60, max_sessions=5, max_events=10)
+        after = time.time()
+
+        session_sql, session_params = mock_conn.execute.call_args_list[0][0]
+        event_sql, event_params = mock_conn.execute.call_args_list[1][0]
+
+        assert "IFNULL(private, 0) != 1" in session_sql
+        expected_day = _start_of_local_day(after)
+        assert abs(session_params[0] - expected_day) < 3
+        assert before - 3600 <= event_params[0] <= after - 3600 + 1
+        assert "timestamp >=" in event_sql
+
+
+def test_build_recent_context_filters_password_managers():
+    """Capture-opt-out processes (password managers) must not reach the prompt."""
+    with patch("core.chat_context.conn") as mock_conn:
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("context_change", "1Password.exe", "Login", None,
+             "Opened 1Password", None, "2026-10-11 15:10:00"),
+            ("context_change", "code", "main.py - VS Code", None,
+             "Editing", None, "2026-10-11 15:11:00"),
+        ]
+
+        context = build_recent_context()
+
+        assert len(context["events"]) == 1
+        assert context["events"][0]["process_name"] == "code"
+
+
+def test_build_recent_context_filters_excluded_apps():
+    """Selected-apps / excluded processes must not reach the prompt."""
+    with patch("core.chat_context.conn") as mock_conn, \
+         patch("core.chat_context.should_watch_process", side_effect=lambda p: "slack" not in (p or "").lower()):
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("context_change", "Slack.exe", "team chat", None,
+             "Slack message", None, "2026-10-11 15:10:00"),
+            ("context_change", "code", "main.py - VS Code", None,
+             "Editing", None, "2026-10-11 15:11:00"),
+        ]
+
+        context = build_recent_context()
+
+        assert len(context["events"]) == 1
+        assert context["events"][0]["process_name"] == "code"
+
+
+def test_build_recent_context_filters_normalized_private_title():
+    """Capture rewrites private browsing to 'Private window'; chat must skip it."""
+    with patch("core.chat_context.conn") as mock_conn:
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("context_change", "chrome.exe", "Private window", None,
+             "Private browsing", None, "2026-10-11 15:10:00"),
+            ("context_change", "chrome.exe", "Regular Page - Google Chrome", None,
+             "Normal browsing", None, "2026-10-11 15:11:00"),
+        ]
+
+        context = build_recent_context()
+
+        assert len(context["events"]) == 1
+        assert context["events"][0]["window_title"] == "Regular Page - Google Chrome"
+
+
+def test_build_recent_context_filters_redacted_apps():
+    """Access-control redacted apps must not reach the prompt."""
+    with patch("core.chat_context.conn") as mock_conn, \
+         patch("core.chat_context.event_is_private", side_effect=lambda proc, title: "whatsapp" in (proc or "").lower()):
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("context_change", "WhatsApp.exe", "Alice", None,
+             "Chat with Alice", None, "2026-10-11 15:10:00"),
+            ("context_change", "code", "main.py - VS Code", None,
+             "Editing", None, "2026-10-11 15:11:00"),
+        ]
+
+        context = build_recent_context()
+
+        assert len(context["events"]) == 1
+        assert context["events"][0]["process_name"] == "code"
+
+
+def test_build_recent_context_drops_event_when_privacy_check_raises():
+    """A privacy/opt-out check that raises must exclude that event (fail closed)."""
+    def private_or_raise(proc, title):
+        if "flaky" in (proc or "").lower():
+            raise RuntimeError("privacy lookup failed")
+        return False
+
+    with patch("core.chat_context.conn") as mock_conn, \
+         patch("core.chat_context.event_is_private", side_effect=private_or_raise):
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("context_change", "flaky.exe", "Unknown", None,
+             "Should be dropped", None, "2026-10-11 15:10:00"),
+            ("context_change", "code", "main.py - VS Code", None,
+             "Editing", None, "2026-10-11 15:11:00"),
+        ]
+
+        context = build_recent_context()
+
+        assert len(context["events"]) == 1
+        assert context["events"][0]["process_name"] == "code"
