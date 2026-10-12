@@ -142,6 +142,8 @@ Delete `setup_complete.json` from the app data folder below. The setup wizard ru
 
 ### Check if everything is working
 
+Open **Settings → About** and click **Copy diagnostics** for a JSON snapshot of platform, packages, capture status, and storage counts. The snapshot does not include screen text, URLs, or clipboard contents. Paste it into a bug report when something is wrong.
+
 The API listens on `127.0.0.1` at the port recorded in `api_process.json` next to the app data. It is not fixed at port 8000.
 
 ```powershell

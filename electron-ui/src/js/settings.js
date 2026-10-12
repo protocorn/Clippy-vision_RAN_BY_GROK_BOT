@@ -155,7 +155,47 @@ async function refinePlatformLabel() {
  } catch (_) { /* keep fallback */ }
 }
 
+function wireDiagnosticsCopy() {
+ const button = document.getElementById('diagnostics-copy-btn')
+ if (!button || button.dataset.wired === '1') return
+ button.dataset.wired = '1'
+ button.addEventListener('click', copyDiagnostics)
+}
+
+export async function copyDiagnostics() {
+ const button = document.getElementById('diagnostics-copy-btn')
+ const status = document.getElementById('diagnostics-status')
+ if (button) button.disabled = true
+ setStatus(status, 'Copying...', null)
+ try {
+  if (!window.clippy?.getDiagnostics) {
+   throw new Error('API is not reachable.')
+  }
+  const data = await window.clippy.getDiagnostics()
+  const text = JSON.stringify(data, null, 2)
+  if (!navigator.clipboard?.writeText) {
+   throw new Error('Clipboard is not available.')
+  }
+  await navigator.clipboard.writeText(text)
+  setStatus(status, 'Copied', 'ok')
+  setTimeout(() => setStatus(status, '', null), 2000)
+ } catch (error) {
+  const message = error?.message || String(error)
+  const unreachable = /failed to fetch|networkerror|load failed|not reachable|ECONNREFUSED/i.test(message)
+  setStatus(
+   status,
+   unreachable
+    ? 'Could not copy diagnostics: API is not reachable.'
+    : `Could not copy diagnostics: ${message}`,
+   'error',
+  )
+ } finally {
+  if (button) button.disabled = false
+ }
+}
+
 export async function loadAboutInfo() {
+ wireDiagnosticsCopy()
  if (aboutPlatform) aboutPlatform.textContent = platformLabel()
  refinePlatformLabel()
 
