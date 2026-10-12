@@ -9,11 +9,25 @@ Connect Clippy Vision to Visual Studio Code using MCP and access its tools throu
 3. VS Code should open an MCP installation prompt. Review the server details before approving.
 4. Check the server status and confirm the tools are available in Copilot Chat Agent mode.
 
-Clippy Vision builds the installation URL using `buildVscodeInstallUrl` in `electron-ui/electron/lib/mcp.js`. The URL uses the `vscode:mcp/install?...` scheme and attempts to write the server configuration to the VS Code user `mcp.json` when possible.
+What **Connect** does (see `connectMcpClient` in `electron-ui/electron/lib/mcp.js`):
 
-If the prompt does not open, try the manual setup below.
+1. It writes a `clippy-vision` entry under the top-level `servers` key of your VS Code user `mcp.json`, at the standard path for your OS:
+   - **Windows:** `%APPDATA%\Code\User\mcp.json`
+   - **macOS:** `~/Library/Application Support/Code/User/mcp.json`
+   - **Linux:** `$XDG_CONFIG_HOME/Code/User/mcp.json`, or `~/.config/Code/User/mcp.json` when `XDG_CONFIG_HOME` is not set
 
-**Verification status:** Not verified yet.
+   Other servers already in the file are kept. If the file cannot be written, Connect stops and shows an error instead of continuing.
+2. It then opens VS Code's install prompt through a `vscode:mcp/install?...` link (built by `buildVscodeInstallUrl`).
+
+The **Connected** status in **Settings → Connect apps** reads the same file, and **Disconnect** removes only the `clippy-vision` entry from it.
+
+Connect only knows the standard **VS Code** (stable) user folder. VS Code Insiders, a moved user-data folder, and possibly non-default profiles use other locations; for those, follow the manual setup below.
+
+If the prompt does not open, the config file has already been written (Connect writes it first). Restart VS Code and check **MCP: List Servers**, or use the manual setup below.
+
+> Earlier builds always wrote the Windows-style path (`~/AppData/Roaming/Code/User/mcp.json`) on macOS and Linux, so VS Code never read it. This was fixed in #32 (issue #30), which was surfaced by @Afrin-banu-A while writing this guide (#29). If you connected on macOS or Linux before that fix, click **Connect** again after updating (the stray `~/AppData/Roaming/...` file is unused and can be deleted), or follow the manual setup.
+
+**Verification status:** Path logic covered by unit tests in `electron-ui/electron/lib/mcp.test.js`; the end-to-end flow in VS Code is not verified yet.
 
 ## Manual setup
 
