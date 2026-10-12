@@ -35,9 +35,11 @@ Verification labels used below:
 - In-app chat UI with streaming ([#25](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/25)) — **CI-only**; not exercised against a real Ollama model
 - Live progress while the setup wizard downloads Ollama models ([#19](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/19)) — **CI-only** (parser tests; wizard UI itself is not driven in CI)
 - Captured screen text marked untrusted in MCP replies and in-app chat ([#27](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/27)) — **CI-only**
+- Honor OS-level window capture opt-outs ([#28](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/28)) — **CI-only** (mocked Win32 `GetWindowDisplayAffinity`, macOS window-sharing state, Linux no-op plus process-name fallback). **Not real machine.** Linux has no per-window OS capture API.
+- VS Code MCP setup guide ([#29](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/29), [@Afrin-banu-A](https://github.com/Afrin-banu-A)) — documentation; the author marked the setup steps as not verified on a real VS Code install
 - CI testing on Ubuntu and Windows ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7)) — **CI-only**
 - Unsigned Windows NSIS installer and Linux AppImage release workflow with PR dry-run ([#15](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/15), this PR) — **Xvfb launch** and **Windows silent install**: packaged app spawned the backend and `GET /health` returned 200 `{"status":"ok"}` ([run 38258155536](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/actions/runs/38258155536) on `e9dd9c9`). Setup was pre-seeded and Ollama stubbed; not a real-machine test.
-- MCP setup guides ([#9](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/9), [#13](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/13))
+- MCP setup guides ([#9](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/9), [#13](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/13), [#29](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/29))
 - Issue and pull request templates ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7))
 
 ### Changed
@@ -53,6 +55,7 @@ Verification labels used below:
   - Now passes OS check and displays "Ubuntu 22.04+ (experimental)"
   - Linux with integrated GPU uses system RAM for VRAM grading
 - Flaky X11 screenshot test under Xvfb waits for the window to map and polls for a non-blank frame ([#24](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/24)) — **CI-only**
+- VS Code one-click Connect wrote `mcp.json` to a Windows-style path on macOS and Linux ([#30](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/issues/30), [#32](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/32)) — **CI-only** (`node --test` path tests on ubuntu-latest and windows-latest). Paths: Windows `%APPDATA%\Code\User\mcp.json`, macOS `~/Library/Application Support/Code/User/mcp.json`, Linux `$XDG_CONFIG_HOME/Code/User/mcp.json` or `~/.config/Code/User/mcp.json`. **Not real machine** (Connect was not clicked in VS Code).
 
 ### Known Issues
 - Python is **not bundled**. The packaged app spawns `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH. `requirements.txt` does not pin a Python version. CI uses Python 3.12. See README.md for wizard behavior when Python is missing.
