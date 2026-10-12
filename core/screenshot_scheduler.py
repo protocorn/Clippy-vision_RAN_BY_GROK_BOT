@@ -311,7 +311,8 @@ def _foreground_accessibility_text() -> str:
         return ""
     process_name = metadata.get("process_name", "")
     title = metadata.get("current_window_title", "")
-    executable = _process_executable(_foreground_hwnd())
+    hwnd = _foreground_hwnd()
+    executable = _process_executable(hwnd)
     if (
         is_clippy_window(process_name, title)
         or should_redact_window(process_name, title)
@@ -320,13 +321,13 @@ def _foreground_accessibility_text() -> str:
         return ""
     from core.private_windows import window_is_private
 
-    if window_is_private(_foreground_hwnd(), process_name):
+    if window_is_private(hwnd, process_name):
         return ""
     
     # Check if the foreground window has opted out of capture
     from core.capture_optout import foreground_should_skip_capture
 
-    if foreground_should_skip_capture(_foreground_hwnd(), process_name):
+    if foreground_should_skip_capture(hwnd, process_name):
         return ""
     captured_text = extract_accessibility_text()
     current = get_window_metadata()
@@ -722,7 +723,8 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
     # Check if the foreground window has opted out of capture via OS-level signals
     from core.capture_optout import foreground_should_skip_capture
 
-    if foreground_should_skip_capture(_foreground_hwnd(), process_name):
+    hwnd_before = _foreground_hwnd()
+    if foreground_should_skip_capture(hwnd_before, process_name):
         increment("screenshots.opted_out")
         return None
     
@@ -734,7 +736,6 @@ def capture_screenshot(timestamp_ms: int) -> Path | None:
         with timed("screenshot.total"):
             # monitor 0 is the virtual desktop; monitor 1 is the primary display.
             # The setting keeps the default capture cost low for multi-monitor Macs.
-            hwnd_before = _foreground_hwnd()
             metadata_before = get_window_metadata()
             with timed("screenshot.grab"):
                 settings = get_capture_settings()
