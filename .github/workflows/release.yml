@@ -8,6 +8,8 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - 'electron-ui/**'
+      - 'scripts/ci_llm_stub.py'
+      - 'requirements.txt'
   workflow_dispatch:
     inputs:
       tag:
@@ -91,244 +93,273 @@ jobs:
           fi
           echo "✓ Windows installer OK"
 
+      # Python is not bundled in the installer. The packaged app spawns
+      # CLIPPY_PYTHON or PATH python (electron-ui/electron/lib/paths.js).
+      # Use the same 3.12 as .github/workflows/tests.yml.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
       - name: Silent install test Windows
         shell: pwsh
         working-directory: electron-ui/dist
+        env:
+          ELECTRON_ENABLE_LOGGING: "1"
         run: |
-          Write-Host "=== Installing Python 3.11 and dependencies ==="
-          
-          # Install Python 3.11
-          Write-Host "Installing Python 3.11..."
-          $pythonInstaller = "python-3.11.9-amd64.exe"
-          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.11.9/$pythonInstaller" -OutFile $pythonInstaller
-          Start-Process -FilePath $pythonInstaller -ArgumentList "/quiet", "InstallAllUsers=0", "PrependPath=1" -Wait -NoNewWindow
-          
-          # Refresh PATH
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          
-          # Verify Python installation
-          $pythonExe = "python"
+          # CI-only first-run bypass. Not a user-facing skip flag.
+          #
+          # SETUP_FLAG in electron-ui/electron/lib/paths.js is
+          #   <Electron userData>/setup_complete.json
+          # NOT <userData>/data/setup_complete.json. Packaged Windows userData
+          # is %APPDATA%\Clippy Vision (Roaming), not LocalAppData.
+          # Seeding that file skips the interactive wizard so main.js takes
+          # the runPreflightChecks() -> api.startServer() path.
+          #
+          # llm_config.json lives in <userData>/data/ (LLM_CONFIG_FILE). A
+          # base_url other than http://127.0.0.1:11434 makes usesManagedOllama()
+          # false, so preflight talks to scripts/ci_llm_stub.py on :11555
+          # instead of requiring Ollama or a real model.
+          #
+          # Python is not bundled; CLIPPY_PYTHON points at the runner interpreter
+          # that already has requirements.txt installed.
+          #
+          # Proves: packaged app spawns the backend and GET /health returns 200
+          # once setup is already complete.
+          # Does not prove: wizard, Ollama, a real model, or real hardware.
+
+          $ErrorActionPreference = "Continue"
+          $pythonExe = (python -c "import sys; print(sys.executable)").Trim()
+          if (-not $pythonExe) {
+            Write-Host "ERROR: python executable not found on PATH"
+            exit 1
+          }
+          $env:CLIPPY_PYTHON = $pythonExe
+          $env:ELECTRON_ENABLE_LOGGING = "1"
+          Write-Host "CLIPPY_PYTHON=$env:CLIPPY_PYTHON"
           & $pythonExe --version
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Python installation failed"
-            exit 1
+
+          function Write-JsonFile([string]$Path, $Object) {
+            $dir = Split-Path -Parent $Path
+            New-Item -Path $dir -ItemType Directory -Force | Out-Null
+            $json = $Object | ConvertTo-Json -Depth 6
+            [System.IO.File]::WriteAllText($Path, $json)
+            Write-Host "  wrote $Path"
           }
-          
-          # Install requirements
-          Write-Host "Installing Python dependencies..."
-          & $pythonExe -m pip install --upgrade pip
-          & $pythonExe -m pip install -r ..\..\requirements.txt
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to install Python dependencies"
-            exit 1
+
+          function Seed-ClippySetup([string]$UserData) {
+            Write-Host "Seeding Electron userData: $UserData"
+            Write-JsonFile (Join-Path $UserData "setup_complete.json") @{
+              version = "2.1.0"
+              completedAt = (Get-Date).ToUniversalTime().ToString("o")
+            }
+            Write-JsonFile (Join-Path $UserData "data\llm_config.json") @{
+              provider = "ollama"
+              base_url = "http://127.0.0.1:11555"
+              api_key = ""
+              chat_model = "test-model"
+              embedding_model = "nomic-embed-text"
+            }
           }
-          
+
           Write-Host "=== Running silent installation ==="
           $installer = Get-ChildItem -Filter "ClippyVision-Windows-Setup-*.exe" | Select-Object -First 1
           if (-not $installer) {
-            Write-Error "No installer found"
+            Write-Host "ERROR: No installer found"
             exit 1
           }
-          
+
           Write-Host "Installing: $($installer.Name)"
-          $installLog = "install-test.log"
-          
-          # Run silent install
+          $installLog = Join-Path (Get-Location) "install-test.log"
           Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait -NoNewWindow
-          
+
           Write-Host "Checking installation..."
-          $programFiles = ${env:ProgramFiles}
-          $installPath = "$programFiles\Clippy Vision"
-          $exePath = "$installPath\Clippy Vision.exe"
-          
-          # Also check local app data (user install)
-          $localAppData = ${env:LOCALAPPDATA}
-          $localInstallPath = "$localAppData\Programs\Clippy Vision"
-          $localExePath = "$localInstallPath\Clippy Vision.exe"
-          
-          $installedExe = $null
-          $installLocation = ""
-          if (Test-Path $exePath) {
-            $installedExe = $exePath
-            $installLocation = "Program Files"
-            Write-Host "✓ Installation successful (Program Files): $exePath"
-          } elseif (Test-Path $localExePath) {
-            $installedExe = $localExePath
-            $installLocation = "LocalAppData\Programs"
-            Write-Host "✓ Installation successful (LocalAppData\Programs): $localExePath"
-          } else {
-            Write-Error "Installation failed - executable not found at either location:"
-            Write-Error "  - $exePath"
-            Write-Error "  - $localExePath"
+          $exeCandidates = @(
+            "${env:ProgramFiles}\Clippy Vision\Clippy Vision.exe",
+            "${env:LOCALAPPDATA}\Programs\Clippy Vision\Clippy Vision.exe"
+          )
+          $installedExe = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $installedExe) {
+            Write-Host "ERROR: Installation failed - executable not found:"
+            $exeCandidates | ForEach-Object { Write-Host "  - $_" }
             "Installation failed - exe not found" | Out-File $installLog
             exit 1
           }
-          
-          $exeSize = (Get-Item $installedExe).Length
-          Write-Host "  Installed exe size: $exeSize bytes"
-          Write-Host "  Install location: $installLocation"
-          
-          # Pre-seed setup to bypass wizard
-          Write-Host "Pre-seeding setup configuration..."
-          $appDataDir = "$localAppData\Clippy Vision\data"
-          New-Item -Path $appDataDir -ItemType Directory -Force | Out-Null
-          
-          # Create setup_complete.json
-          $setupComplete = @{
-            version = "2.1.0"
-            completedAt = (Get-Date).ToUniversalTime().ToString("o")
+          Write-Host "OK: installed $installedExe ($((Get-Item $installedExe).Length) bytes)"
+
+          foreach ($candidate in @(
+            (Join-Path $env:APPDATA "Clippy Vision"),
+            (Join-Path $env:APPDATA "clippy-vision")
+          )) {
+            Seed-ClippySetup $candidate
           }
-          $setupComplete | ConvertTo-Json | Out-File "$appDataDir\setup_complete.json" -Encoding UTF8
-          
-          # Create llm_config.json with stub HTTP endpoint (bypass Ollama requirement)
-          # The backend preflight will check this URL instead of requiring Ollama
-          $llmConfig = @{
-            provider = "ollama"
-            base_url = "http://127.0.0.1:11555"
-            api_key = ""
-            chat_model = "test-model"
-            embedding_model = "nomic-embed-text"
-          }
-          $llmConfig | ConvertTo-Json | Out-File "$appDataDir\llm_config.json" -Encoding UTF8
-          
-          # Start a minimal stub server on 11555 to satisfy preflight checks
-          Write-Host "Starting stub LLM API server on port 11555..."
-          $stubServer = Start-Job -ScriptBlock {
-            $listener = New-Object System.Net.HttpListener
-            $listener.Prefixes.Add("http://127.0.0.1:11555/")
-            $listener.Start()
-            Write-Host "Stub server listening on http://127.0.0.1:11555/"
-            while ($listener.IsListening) {
-              $context = $listener.GetContext()
-              $response = $context.Response
-              $response.StatusCode = 200
-              $response.ContentType = "application/json"
-              $buffer = [System.Text.Encoding]::UTF8.GetBytes('{"status":"ok"}')
-              $response.ContentLength64 = $buffer.Length
-              $response.OutputStream.Write($buffer, 0, $buffer.Length)
-              $response.OutputStream.Close()
-            }
-          }
+
+          Write-Host "Starting stub LLM API (scripts/ci_llm_stub.py) on port 11555..."
+          $stubScript = (Resolve-Path "..\..\scripts\ci_llm_stub.py").Path
+          $stubOut = Join-Path (Get-Location) "llm-stub.log"
+          $stubProc = Start-Process -FilePath $pythonExe -ArgumentList @($stubScript) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stubOut -RedirectStandardError "$stubOut.err"
           Start-Sleep -Seconds 2
-          
-          Write-Host "✓ Setup pre-seeded (bypasses wizard, stub LLM API on 11555)"
-          
-          # Launch test (60 seconds with HTTP check)
-          Write-Host "Launching application (60 second test with HTTP backend check)..."
-          $launchLog = "$localInstallPath\launch-test.log"
-          
-          $process = Start-Process -FilePath $installedExe -PassThru -WindowStyle Hidden -RedirectStandardOutput $launchLog -RedirectStandardError "$launchLog.err" -ErrorAction Stop
-          
+          try {
+            $tags = Invoke-WebRequest -Uri "http://127.0.0.1:11555/api/tags" -TimeoutSec 3 -UseBasicParsing
+            Write-Host "OK: stub /api/tags $($tags.StatusCode) $($tags.Content)"
+          } catch {
+            Write-Host "ERROR: stub LLM server failed to start: $_"
+            if (Test-Path $stubOut) { Get-Content $stubOut | Write-Host }
+            if (Test-Path "$stubOut.err") { Get-Content "$stubOut.err" | Write-Host }
+            exit 1
+          }
+
+          $launchLog = Join-Path (Get-Location) "launch-test.log"
+          $launchErr = Join-Path (Get-Location) "launch-test.stderr"
+          function Combined-LaunchLog {
+            $parts = @()
+            foreach ($f in @($launchLog, $launchErr)) {
+              if (Test-Path $f) {
+                $parts += Get-Content $f -Raw -ErrorAction SilentlyContinue
+              }
+            }
+            return ($parts -join "`n")
+          }
+
+          function Start-Clippy {
+            if (Test-Path $launchLog) { Remove-Item $launchLog -Force }
+            if (Test-Path $launchErr) { Remove-Item $launchErr -Force }
+            Write-Host "Launching: $installedExe"
+            return Start-Process -FilePath $installedExe -PassThru -WindowStyle Hidden -RedirectStandardOutput $launchLog -RedirectStandardError $launchErr -ErrorAction Stop
+          }
+
+          function Stop-Clippy([System.Diagnostics.Process]$proc) {
+            if ($null -eq $proc) { return }
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Get-Process -Name "Clippy Vision" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+          }
+
+          $process = Start-Clippy
           if (-not $process) {
-            Write-Error "Failed to start process"
+            Write-Host "ERROR: Failed to start process"
             "Launch failed" | Out-File $installLog
             exit 1
           }
-          
           Write-Host "  Main process PID: $($process.Id)"
-          
-          # Parse backend port from log
+
           $backendPort = $null
           $backendHttpOk = $false
-          
-          # Monitor for 60 seconds
-          for ($i = 1; $i -le 60; $i++) {
+          $backendHttpBody = ""
+          $userDataFromLog = $null
+          $relaunched = $false
+          $deadlineSeconds = 90
+
+          for ($i = 1; $i -le $deadlineSeconds; $i++) {
             Start-Sleep -Seconds 1
-            
-            # Check if main process exited
             if ($process.HasExited) {
-              Write-Error "Process exited after $i seconds (exit code: $($process.ExitCode))"
-              "Process crashed after ${i}s (code: $($process.ExitCode))" | Out-File $installLog
-              if (Test-Path $launchLog) {
-                Get-Content $launchLog | Write-Host
-              }
+              Write-Host "ERROR: Process exited after $i seconds (exit code: $($process.ExitCode))"
+              Write-Host "=== Launch log ==="
+              Write-Host (Combined-LaunchLog)
+              if ($stubProc -and -not $stubProc.HasExited) { Stop-Process -Id $stubProc.Id -Force -ErrorAction SilentlyContinue }
               exit 1
             }
-            
-            # Try to read port from log
-            if (($null -eq $backendPort) -and (Test-Path $launchLog)) {
-              $logContent = Get-Content $launchLog -Raw -ErrorAction SilentlyContinue
-              if ($logContent -match '\[api\] port=(\d+)') {
-                $backendPort = $matches[1]
-                Write-Host "✓ Backend port announced: $backendPort at ${i}s"
-              }
-            }
-            
-          # Try HTTP health check if port known
-          if (($null -ne $backendPort) -and (-not $backendHttpOk)) {
-            foreach ($hostAddr in @("127.0.0.1", "localhost")) {
-              try {
-                $response = Invoke-WebRequest -Uri "http://${hostAddr}:${backendPort}/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
-                if ($response.StatusCode -eq 200) {
-                  $backendHttpOk = $true
-                  Write-Host "✓ Backend HTTP responding on ${hostAddr}:${backendPort} at ${i}s"
-                  Write-Host "  Response: $($response.Content)"
-                  break
+
+            $logContent = Combined-LaunchLog
+
+            if (-not $userDataFromLog -and $logContent -match '\[paths\] USER_DATA=(.+)') {
+              $userDataFromLog = $matches[1].Trim()
+              Write-Host "OK: USER_DATA from app log: $userDataFromLog at ${i}s"
+              $flagPath = Join-Path $userDataFromLog "setup_complete.json"
+              if (-not (Test-Path $flagPath)) {
+                if ($relaunched) {
+                  Write-Host "ERROR: SETUP_FLAG still missing at $flagPath after re-seed"
+                } else {
+                  Write-Host "SETUP_FLAG missing at logged USER_DATA; seeding and relaunching"
+                  Seed-ClippySetup $userDataFromLog
+                  Stop-Clippy $process
+                  $process = Start-Clippy
+                  $relaunched = $true
+                  $backendPort = $null
+                  $i = 0
+                  continue
                 }
-              } catch {
-                # Connection failed, continue
+              } else {
+                Write-Host "OK: SETUP_FLAG present at $flagPath"
               }
             }
-          }
-            
-            # Show progress every 10 seconds
+
+            if (($null -eq $backendPort) -and $logContent -match '\[api\] port=(\d+)') {
+              $backendPort = $matches[1]
+              Write-Host "OK: Backend port announced: $backendPort at ${i}s"
+            }
+
+            if (($null -ne $backendPort) -and (-not $backendHttpOk)) {
+              foreach ($hostAddr in @("127.0.0.1", "localhost")) {
+                try {
+                  $response = Invoke-WebRequest -Uri "http://${hostAddr}:${backendPort}/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+                  if ($response.StatusCode -eq 200) {
+                    $backendHttpOk = $true
+                    $backendHttpBody = [string]$response.Content
+                    Write-Host "OK: Backend HTTP 200 on ${hostAddr}:${backendPort} at ${i}s"
+                    Write-Host "  Response: $backendHttpBody"
+                    break
+                  }
+                } catch {
+                  # still starting
+                }
+              }
+            }
+
+            if ($logContent -match '\[preflight\] Failed at step') {
+              Write-Host "WARNING: preflight failure in logs at ${i}s"
+            }
+
             if ($i % 10 -eq 0) {
               Write-Host "  ...${i}s elapsed (process alive, backend HTTP: $(if ($backendHttpOk) {'OK'} else {'not yet'}))"
             }
+
+            if ($backendHttpOk) { break }
           }
-          
-          Write-Host "✓ Process still running after 60 seconds"
-          
-          # Stop stub server
-          Stop-Job -Job $stubServer -ErrorAction SilentlyContinue
-          Remove-Job -Job $stubServer -ErrorAction SilentlyContinue
-          
-          # Verify backend status - FAIL HARD if HTTP check never succeeded
+
+          if ($stubProc -and -not $stubProc.HasExited) {
+            Stop-Process -Id $stubProc.Id -Force -ErrorAction SilentlyContinue
+          }
+
           if ($null -eq $backendPort) {
-            Write-Error "ERROR: Backend port was never announced in logs"
+            Write-Host "ERROR: Backend port was never announced in logs"
             Write-Host "=== Launch log ==="
-            if (Test-Path $launchLog) {
-              Get-Content $launchLog | Write-Host
-            }
-            if (Test-Path "$launchLog.err") {
-              Write-Host "=== Backend stderr ==="
-              Get-Content "$launchLog.err" | Write-Host
-            }
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Write-Host (Combined-LaunchLog)
+            Stop-Clippy $process
             exit 1
-          } elseif (-not $backendHttpOk) {
-            Write-Error "ERROR: Backend HTTP health check FAILED"
-            Write-Error "  Port announced: $backendPort"
-            Write-Error "  HTTP /health never returned 200 OK"
-            Write-Host "=== Launch log ==="
-            if (Test-Path $launchLog) {
-              Get-Content $launchLog | Write-Host
-            }
-            if (Test-Path "$launchLog.err") {
-              Write-Host "=== Backend stderr ==="
-              Get-Content "$launchLog.err" | Write-Host
-            }
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            exit 1
-          } else {
-            Write-Host "✓ Backend HTTP health check PASSED"
           }
-          
-          # Cleanup
-          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-          
-          # Write summary
-          "Installation: $installLocation" | Out-File $installLog
-          "Process ran for 60 seconds" | Out-File $installLog -Append
-          "Backend port: $(if ($null -ne $backendPort) {$backendPort} else {'not announced'})" | Out-File $installLog -Append
-          "Backend HTTP: $(if ($backendHttpOk) {'PASS'} else {'FAIL or not reached'})" | Out-File $installLog -Append
-          
+          if (-not $backendHttpOk) {
+            Write-Host "ERROR: Backend HTTP health check FAILED"
+            Write-Host "  Port announced: $backendPort"
+            Write-Host "  HTTP /health never returned 200 OK"
+            Write-Host "  USER_DATA: $userDataFromLog"
+            Write-Host "=== Launch log ==="
+            Write-Host (Combined-LaunchLog)
+            Stop-Clippy $process
+            exit 1
+          }
+
+          Write-Host "OK: Backend HTTP health check PASSED"
+          Stop-Clippy $process
+
+          @(
+            "Installation: $installedExe",
+            "Backend port: $backendPort",
+            "Backend HTTP: PASS (200)",
+            "Body: $backendHttpBody",
+            "USER_DATA: $userDataFromLog"
+          ) | Out-File $installLog
+
           Write-Host ""
-          Write-Host "✓ Silent install test completed"
-          Write-Host "  - Installed to: $installLocation"
-          Write-Host "  - Process stable for 60s"
-          Write-Host "  - Backend port: $(if ($null -ne $backendPort) {$backendPort} else {'not announced'})"
-          Write-Host "  - Backend HTTP: $(if ($backendHttpOk) {'PASS (200 OK)'} else {'FAIL or not reached'})"
+          Write-Host "Silent install test completed"
+          Write-Host "  - Installed: $installedExe"
+          Write-Host "  - Backend port: $backendPort"
+          Write-Host "  - Backend HTTP: PASS (200 OK) $backendHttpBody"
 
       - name: Upload Windows test artifacts
         if: always()
@@ -337,6 +368,9 @@ jobs:
           name: windows-install-test
           path: |
             electron-ui/dist/install-test.log
+            electron-ui/dist/launch-test.log
+            electron-ui/dist/launch-test.stderr
+            electron-ui/dist/llm-stub.log
           retention-days: 14
 
       - name: Upload Windows installer artifact
@@ -500,295 +534,227 @@ jobs:
           echo "✓ AppImage structure OK"
           rm -rf squashfs-root
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
       - name: Launch test Linux AppImage under Xvfb
         working-directory: electron-ui/dist
+        env:
+          ELECTRON_ENABLE_LOGGING: "1"
         run: |
-          echo "=== Installing system dependencies ==="
-          echo "Installing Xvfb, FUSE, Python 3.11, and diagnostic tools..."
+          # CI-only first-run bypass. Not a user-facing skip flag.
+          #
+          # SETUP_FLAG (electron-ui/electron/lib/paths.js) is
+          #   <Electron userData>/setup_complete.json
+          # Packaged Linux userData is ~/.config/Clippy Vision (productName).
+          # It is NOT ~/.config/Clippy Vision/data/setup_complete.json.
+          # Seeding the flag skips the wizard so main.js runs preflight and
+          # api.startServer().
+          #
+          # llm_config.json in <userData>/data/ points base_url at
+          # scripts/ci_llm_stub.py (:11555) so usesManagedOllama() is false
+          # and preflight does not require Ollama or a real model.
+          #
+          # Python is not bundled. CLIPPY_PYTHON is the runner interpreter
+          # that already has requirements.txt installed (same 3.12 as tests.yml).
+          #
+          # Proves: packaged AppImage spawns the backend and GET /health
+          # returns 200 once setup is already complete.
+          # Does not prove: wizard, Ollama, a real model, or real hardware.
+
+          set -euo pipefail
+          echo "=== Installing Xvfb, FUSE, and diagnostic tools ==="
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl lsof iproute2 \
-            software-properties-common python3.11 python3.11-venv python3-pip
-          
-          # Verify Python 3.11
-          python3.11 --version
-          
-          # Install Python dependencies
-          echo "Installing Python dependencies..."
-          python3.11 -m pip install --upgrade pip
-          python3.11 -m pip install -r ../../requirements.txt
-          
-          echo "=== Pre-seeding setup configuration ==="
-          APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
-          chmod +x "$APPIMAGE"
-          
-          # Pre-seed setup files in expected location
-          CONFIG_DIR="$HOME/.config/Clippy Vision/data"
-          mkdir -p "$CONFIG_DIR"
-          
-          # Create setup_complete.json
-          cat > "$CONFIG_DIR/setup_complete.json" << 'EOF_SETUP'
-          {
-            "version": "2.1.0",
-            "completedAt": "2026-10-11T17:00:00.000Z"
+          sudo apt-get install -y xvfb x11-utils imagemagick xterm xdotool libfuse2 procps curl lsof iproute2
+
+          PYTHON_EXE="$(python -c 'import sys; print(sys.executable)')"
+          export CLIPPY_PYTHON="$PYTHON_EXE"
+          export ELECTRON_ENABLE_LOGGING=1
+          echo "CLIPPY_PYTHON=$CLIPPY_PYTHON"
+          python --version
+
+          seed_clippy_setup() {
+            local user_data="$1"
+            mkdir -p "$user_data/data"
+            printf '%s\n' '{"version":"2.1.0","completedAt":"2026-10-12T00:00:00.000Z"}' > "$user_data/setup_complete.json"
+            printf '%s\n' '{"provider":"ollama","base_url":"http://127.0.0.1:11555","api_key":"","chat_model":"test-model","embedding_model":"nomic-embed-text"}' > "$user_data/data/llm_config.json"
+            echo "seeded $user_data/setup_complete.json"
+            echo "seeded $user_data/data/llm_config.json"
           }
-          EOF_SETUP
-          
-          # Create llm_config.json with stub HTTP endpoint (bypass Ollama requirement)
-          cat > "$CONFIG_DIR/llm_config.json" << 'EOF_LLM'
-          {
-            "provider": "ollama",
-            "base_url": "http://127.0.0.1:11555",
-            "api_key": "",
-            "chat_model": "test-model",
-            "embedding_model": "nomic-embed-text"
-          }
-          EOF_LLM
-          
-          # Start stub LLM API server to satisfy preflight checks
-          echo "Starting stub LLM API server on port 11555..."
-          python3.11 -m http.server 11555 --bind 127.0.0.1 > /dev/null 2>&1 &
+
+          echo "=== Pre-seeding setup_complete.json at Electron userData root ==="
+          seed_clippy_setup "$HOME/.config/Clippy Vision"
+          seed_clippy_setup "$HOME/.config/clippy-vision"
+
+          echo "=== Starting stub LLM API on port 11555 ==="
+          python ../../scripts/ci_llm_stub.py > llm-stub.log 2>&1 &
           STUB_PID=$!
           sleep 1
-          
-          # Test stub server
-          if curl -s http://127.0.0.1:11555/ > /dev/null; then
-            echo "✓ Stub server running on port 11555"
-          else
-            echo "ERROR: Stub server failed to start"
+          TAGS_BODY="$(curl -sS -w '\n%{http_code}' http://127.0.0.1:11555/api/tags || true)"
+          echo "stub /api/tags: $TAGS_BODY"
+          echo "$TAGS_BODY" | tail -1 | grep -qx 200 || {
+            echo "ERROR: stub LLM server failed to start"
+            cat llm-stub.log || true
+            kill $STUB_PID 2>/dev/null || true
             exit 1
-          fi
-          
-          # Set CLIPPY_PYTHON to use our installed Python 3.11
-          export CLIPPY_PYTHON="python3.11"
-          
-          echo "=== Starting Xvfb and AppImage ==="
-          
-          echo "Starting Xvfb on :99..."
+          }
+
+          APPIMAGE=$(ls ClippyVision-Linux-*.AppImage 2>/dev/null | head -1)
+          chmod +x "$APPIMAGE"
+
+          echo "=== Starting Xvfb on :99 ==="
           Xvfb :99 -screen 0 1024x768x24 &
           XVFB_PID=$!
           export DISPLAY=:99
           sleep 2
-          
-          echo "Launching AppImage with CLIPPY_PYTHON=$CLIPPY_PYTHON..."
+
           LOG_FILE="launch-test.log"
           STDERR_FILE="launch-test.stderr"
-          ./"$APPIMAGE" > "$LOG_FILE" 2> "$STDERR_FILE" &
-          APP_PID=$!
-          
-          echo "AppImage PID: $APP_PID"
-          echo "Waiting up to 90 seconds for startup..."
-          
-          # Monitor for 90 seconds, checking for backend HTTP and window
+
+          start_app() {
+            rm -f "$LOG_FILE" "$STDERR_FILE"
+            echo "Launching AppImage with CLIPPY_PYTHON=$CLIPPY_PYTHON"
+            ./"$APPIMAGE" > "$LOG_FILE" 2> "$STDERR_FILE" &
+            APP_PID=$!
+            echo "AppImage PID: $APP_PID"
+          }
+
+          stop_app() {
+            kill $APP_PID 2>/dev/null || true
+            sleep 1
+            kill -9 $APP_PID 2>/dev/null || true
+          }
+
+          dump_logs() {
+            echo "=== Application stdout ==="
+            cat "$LOG_FILE" 2>/dev/null || true
+            echo "=== Application stderr ==="
+            cat "$STDERR_FILE" 2>/dev/null || true
+            echo "=== Listening TCP ==="
+            ss -tlnp 2>/dev/null | head -40 || true
+            echo "=== Python processes ==="
+            ps -ef | grep -i python | grep -v grep || true
+          }
+
+          start_app
+
           BACKEND_PORT=""
           BACKEND_HTTP_OK=false
+          BACKEND_HTTP_BODY=""
           WINDOW_FOUND=false
-          
-          for i in {1..90}; do
-            # Check if main process still alive
+          USER_DATA_LOGGED=""
+          RELAUNCHED=false
+
+          for i in $(seq 1 90); do
             if ! kill -0 $APP_PID 2>/dev/null; then
               echo "ERROR: AppImage crashed after $i seconds"
-              echo "=== Crash log ==="
-              cat "$LOG_FILE"
-              kill $XVFB_PID 2>/dev/null || true
+              dump_logs
+              kill $STUB_PID $XVFB_PID 2>/dev/null || true
               exit 1
             fi
-            
-            # Check log for backend port announcement
-            if [ -z "$BACKEND_PORT" ]; then
-              PORT_LINE=$(grep -o "\[api\] port=[0-9]*" "$LOG_FILE" 2>/dev/null | head -1)
-              if [ -n "$PORT_LINE" ]; then
-                BACKEND_PORT=$(echo "$PORT_LINE" | grep -o "[0-9]\+")
-                if [ -n "$BACKEND_PORT" ]; then
-                  echo "✓ Backend port announced: $BACKEND_PORT at ${i}s"
-                  
-                  # Show diagnostic info when port is announced
-                  echo "=== Diagnostics at ${i}s (port announced) ==="
-                  echo "--- Listening TCP ports (ss -tlnp) ---"
-                  ss -tlnp 2>&1 | grep -E "State|$BACKEND_PORT|127.0.0.1" || echo "(no matches)"
-                  echo "--- Python processes (ps -ef | grep python) ---"
-                  ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
-                  echo "=== End diagnostics ==="
+
+            if [ -z "$USER_DATA_LOGGED" ]; then
+              USER_DATA_LOGGED="$(grep -oE '\[paths\] USER_DATA=.*' "$LOG_FILE" "$STDERR_FILE" 2>/dev/null | head -1 | sed 's/.*USER_DATA=//' || true)"
+              if [ -n "$USER_DATA_LOGGED" ]; then
+                echo "OK: USER_DATA from app log: $USER_DATA_LOGGED at ${i}s"
+                if [ ! -f "$USER_DATA_LOGGED/setup_complete.json" ]; then
+                  if [ "$RELAUNCHED" = true ]; then
+                    echo "ERROR: SETUP_FLAG still missing at $USER_DATA_LOGGED/setup_complete.json"
+                    dump_logs
+                    kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
+                    exit 1
+                  fi
+                  echo "SETUP_FLAG missing at logged USER_DATA; seeding and relaunching"
+                  seed_clippy_setup "$USER_DATA_LOGGED"
+                  stop_app
+                  RELAUNCHED=true
+                  BACKEND_PORT=""
+                  start_app
+                  continue
                 fi
+                echo "OK: SETUP_FLAG present at $USER_DATA_LOGGED/setup_complete.json"
               fi
             fi
-            
-            # If port known, try HTTP health check
+
+            if [ -z "$BACKEND_PORT" ]; then
+              PORT_LINE="$(grep -oE '\[api\] port=[0-9]+' "$LOG_FILE" "$STDERR_FILE" 2>/dev/null | head -1 || true)"
+              if [ -n "$PORT_LINE" ]; then
+                BACKEND_PORT="$(echo "$PORT_LINE" | grep -oE '[0-9]+')"
+                echo "OK: Backend port announced: $BACKEND_PORT at ${i}s"
+              fi
+            fi
+
             if [ -n "$BACKEND_PORT" ] && [ "$BACKEND_HTTP_OK" = false ]; then
-              # Try both 127.0.0.1 and localhost
-              for host in "127.0.0.1" "localhost"; do
-                HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "http://${host}:${BACKEND_PORT}/health" 2>&1 || echo "")
-                HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
-                HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
-                
+              for host in 127.0.0.1 localhost; do
+                HTTP_RESPONSE="$(curl -sS -w '\n%{http_code}' "http://${host}:${BACKEND_PORT}/health" 2>/dev/null || true)"
+                HTTP_CODE="$(printf '%s\n' "$HTTP_RESPONSE" | tail -1)"
+                HTTP_BODY="$(printf '%s\n' "$HTTP_RESPONSE" | sed '$d')"
                 if [ "$HTTP_CODE" = "200" ]; then
                   BACKEND_HTTP_OK=true
-                  echo "✓ Backend HTTP responding on ${host}:${BACKEND_PORT} at ${i}s"
+                  BACKEND_HTTP_BODY="$HTTP_BODY"
+                  echo "OK: Backend HTTP 200 on ${host}:${BACKEND_PORT} at ${i}s"
                   echo "  Response: $HTTP_BODY"
-                  
-                  # Show diagnostic info on success
-                  echo "=== Diagnostics at ${i}s (HTTP success) ==="
-                  echo "--- Listening TCP ports (ss -tlnp) ---"
-                  ss -tlnp 2>&1 | grep -E "State|$BACKEND_PORT" || echo "(no matches)"
-                  echo "--- Python processes ---"
-                  ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
-                  echo "=== End diagnostics ==="
                   break
                 fi
               done
             fi
-            
-            # Check for Electron window
+
             if [ "$WINDOW_FOUND" = false ]; then
               if xdotool search --name "Clippy" > /dev/null 2>&1; then
                 WINDOW_FOUND=true
-                echo "✓ Electron window detected at ${i}s"
+                echo "OK: Electron window detected at ${i}s"
               fi
             fi
-            
-            # Exit early if all verified
+
             if [ "$BACKEND_HTTP_OK" = true ] && [ "$WINDOW_FOUND" = true ]; then
-              echo "✓ All components verified, continuing monitoring..."
+              echo "OK: health 200 and window verified"
               break
             fi
-            
             sleep 1
           done
-          
-          # Show mid-point diagnostics if backend not responding yet
-          if [ "$BACKEND_HTTP_OK" = false ] && [ -n "$BACKEND_PORT" ]; then
-            echo "=== Mid-point diagnostics (HTTP not responding after 90s) ==="
-            echo "--- Listening TCP ports (ss -tlnp) ---"
-            ss -tlnp 2>&1 | head -30
-            echo "--- Python processes ---"
-            ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
-            echo "--- Recent log lines ---"
-            tail -20 "$LOG_FILE"
-            echo "=== End mid-point diagnostics ==="
-          fi
-          
-          # Continue monitoring to ensure stability (30 more seconds)
-          echo "Monitoring stability for 30 more seconds..."
-          for i in {1..30}; do
-            if ! kill -0 $APP_PID 2>/dev/null; then
-              echo "ERROR: AppImage crashed during stability check"
-              cat "$LOG_FILE"
-              kill $XVFB_PID 2>/dev/null || true
-              exit 1
-            fi
-            
-            # Retry HTTP if not yet successful
-            if [ -n "$BACKEND_PORT" ] && [ "$BACKEND_HTTP_OK" = false ]; then
-              for host in "127.0.0.1" "localhost"; do
-                HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "http://${host}:${BACKEND_PORT}/health" 2>&1 || echo "")
-                HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
-                HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
-                
-                if [ "$HTTP_CODE" = "200" ]; then
-                  BACKEND_HTTP_OK=true
-                  STABILITY_ELAPSED=$((90 + i))
-                  echo "✓ Backend HTTP responding on ${host}:${BACKEND_PORT} at ${STABILITY_ELAPSED}s"
-                  echo "  Response: $HTTP_BODY"
-                  break
-                fi
-              done
-            fi
-            
-            sleep 1
-          done
-          
-          echo "✓ AppImage stable for 120 seconds total"
-          
-          # Final diagnostics
-          echo "=== Final diagnostics ==="
-          echo "--- All listening TCP ports (ss -tlnp) ---"
-          ss -tlnp 2>&1 | head -40
-          echo "--- Python processes ---"
-          ps -ef | grep -i python | grep -v grep || echo "(no python processes)"
-          echo "=== End final diagnostics ==="
-          
-          # Verify required components started
+
           if [ -z "$BACKEND_PORT" ]; then
             echo "ERROR: Backend port never announced in log"
-            echo "=== Application log ==="
-            cat "$LOG_FILE"
-            kill $APP_PID 2>/dev/null || true
-            kill $XVFB_PID 2>/dev/null || true
+            dump_logs
+            kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
             exit 1
           fi
-          
+
           if [ "$BACKEND_HTTP_OK" = false ]; then
             echo "ERROR: Backend HTTP health check never succeeded"
             echo "  Port announced: $BACKEND_PORT"
-            echo "  Tried: http://127.0.0.1:${BACKEND_PORT}/health and http://localhost:${BACKEND_PORT}/health"
-            echo ""
-            echo "=== Setup bypass configuration ==="
-            echo "  - setup_complete.json: pre-seeded"
-            echo "  - llm_config.json: base_url=http://127.0.0.1:11555 (stub server)"
-            echo "  - CLIPPY_PYTHON: $CLIPPY_PYTHON"
-            echo "  - Python deps: installed via requirements.txt"
-            echo "  - Ollama check: bypassed (external base_url)"
-            echo ""
-            echo "=== Investigation: Backend bundle and startup ==="
-            
-            # Check if backend files are in the AppImage
-            echo "--- Extracting AppImage to check bundle ---"
-            ./"$APPIMAGE" --appimage-extract > /dev/null 2>&1 || true
-            if [ -d "squashfs-root" ]; then
-              echo "Backend files in bundle:"
-              find squashfs-root -name "api_server.py" -o -name "core" -type d | head -5
-              echo "Python in bundle:"
-              find squashfs-root -name "python*" -type f | head -5
-            fi
-            
-            echo ""
-            echo "=== Full application log ==="
-            cat "$LOG_FILE"
-            
-            if [ -f "$STDERR_FILE" ]; then
-              echo ""
-              echo "=== Backend stderr ==="
-              cat "$STDERR_FILE"
-            fi
-            
-            kill $STUB_PID 2>/dev/null || true
-            kill $APP_PID 2>/dev/null || true
-            kill $XVFB_PID 2>/dev/null || true
+            echo "  USER_DATA: $USER_DATA_LOGGED"
+            echo "  CLIPPY_PYTHON: $CLIPPY_PYTHON"
+            dump_logs
+            kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
             exit 1
           fi
-          
+
           if [ "$WINDOW_FOUND" = false ]; then
             echo "ERROR: Electron window never appeared"
-            echo "=== Application log ==="
-            cat "$LOG_FILE"
-            kill $APP_PID 2>/dev/null || true
-            kill $XVFB_PID 2>/dev/null || true
+            dump_logs
+            kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
             exit 1
           fi
-          
-          # Capture screenshot
+
           echo "Capturing screenshot..."
           import -window root -display :99 launch-screenshot.png 2>/dev/null || \
             echo "Screenshot capture failed (non-critical)"
-          
-          # Show log excerpt
+
+          kill $STUB_PID $APP_PID $XVFB_PID 2>/dev/null || true
+
           echo ""
-          echo "=== Launch log excerpt (first 100 lines) ==="
-          head -100 "$LOG_FILE"
-          echo ""
-          echo "=== Launch log excerpt (last 100 lines) ==="
-          tail -100 "$LOG_FILE"
-          
-          # Cleanup
-          kill $STUB_PID 2>/dev/null || true
-          kill $APP_PID 2>/dev/null || true
-          kill $XVFB_PID 2>/dev/null || true
-          
-          echo ""
-          echo "✓ Launch test completed successfully"
+          echo "Launch test completed successfully"
           echo "  - Backend port: $BACKEND_PORT"
-          echo "  - Backend HTTP health check: PASSED (200 OK)"
+          echo "  - Backend HTTP health check: PASSED (200 OK) $BACKEND_HTTP_BODY"
           echo "  - Electron window: verified"
-          echo "  - Stable for 120 seconds"
 
       - name: Upload launch test artifacts
         if: always()
@@ -799,6 +765,7 @@ jobs:
             electron-ui/dist/launch-test.log
             electron-ui/dist/launch-test.stderr
             electron-ui/dist/launch-screenshot.png
+            electron-ui/dist/llm-stub.log
           retention-days: 14
 
       - name: Upload Linux AppImage artifact

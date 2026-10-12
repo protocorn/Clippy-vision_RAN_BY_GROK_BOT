@@ -7,33 +7,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [2.1.0] - Unreleased
 
-First release of the Grok Bot fork. Adds experimental Linux support, expands browser privacy detection, and establishes CI testing infrastructure.
+First release of the Grok Bot fork. Adds experimental Linux support, in-app chat, expands browser privacy detection, and establishes CI plus unsigned installer dry-runs.
 
 **Note:** macOS installers are not included in this release (opt-in only, requires manual validation).
 
+Verification labels used below:
+- **CI-only** — unit/integration tests in GitHub Actions
+- **Xvfb launch** — packaged Linux AppImage launched under Xvfb in the release dry-run
+- **Windows silent install** — packaged NSIS installer silent-installed on `windows-latest` in the release dry-run
+- **real machine** — a physical desktop; nobody has done that for this fork's v2.1.0 work
+
 ### Added
-- Linux platform support with X11 screenshot capture ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10), [#14](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/14))
+- Linux platform support with X11 screenshot capture ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10), [#14](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/14)) — **CI-only** (pytest, including Xvfb screenshot tests)
   - Window metadata collection via `xdotool`
   - Process name resolution via `psutil`
   - Clipboard reading (`wl-paste`, `xclip`, `xsel`)
   - Idle detection (`xprintidle`, `xdotool`)
-  - X11 screenshots via `mss` library with focused-window crop
+  - X11 screenshots via `mss` with focused-window crop
   - Wayland session detection with graceful degradation
   - Blank/all-black frame guard for screenshot quality
-- Firefox, Opera, and Vivaldi private window detection on Windows ([#8](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/8))
+- Linux AT-SPI accessibility text extraction ([#20](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/20)) — **CI-only**
+- Firefox, Opera, and Vivaldi private window detection on Windows ([#8](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/8)) — **CI-only**
   - Firefox: pattern-based detection of "Private Browsing" markers
   - Opera and Vivaldi: Chromium-based BrowserRootView detection
-  - macOS support via AppleScript mode detection
-- CI testing on Ubuntu and Windows ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7))
-  - Automated pytest runs on both platforms
-  - Platform-specific test markers for proper test isolation
-- MCP setup guides ([#9](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/9))
-  - Claude Desktop configuration guide
-  - LM Studio integration instructions
+  - macOS support via AppleScript mode detection (unit tests; Opera marked hypothesis)
+- In-app chat backend (`/chat`, `/chat/stream`) with activity context retrieval ([#23](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/23)) — **CI-only**
+- In-app chat UI with streaming ([#25](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/25)) — **CI-only**; not exercised against a real Ollama model
+- Live progress while the setup wizard downloads Ollama models ([#19](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/19)) — **CI-only** (parser tests; wizard UI itself is not driven in CI)
+- Captured screen text marked untrusted in MCP replies and in-app chat ([#27](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/27)) — **CI-only**
+- CI testing on Ubuntu and Windows ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7)) — **CI-only**
+- Unsigned Windows NSIS installer and Linux AppImage release workflow with PR dry-run ([#15](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/15), this PR) — build + launch checks; see Known Issues for `/health`
+- MCP setup guides ([#9](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/9), [#13](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/13))
 - Issue and pull request templates ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7))
-  - Bug report template with environment details
-  - Feature request template with structured format
-  - Pull request template with comprehensive checklist
 
 ### Changed
 - Updated project roadmap to focus on free, high-impact features ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7))
@@ -41,21 +46,19 @@ First release of the Grok Bot fork. Adds experimental Linux support, expands bro
 - Lazy-loaded Windows/macOS imports for cross-platform compatibility ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10))
 
 ### Fixed
-- Linux metadata collection now resolves PIDs to process names ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10))
+- Linux metadata collection now resolves PIDs to process names ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10)) — **CI-only**
 - CI workflow properly excludes platform-specific tests ([#10](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/10))
-- Setup wizard now accepts Linux and allows users to proceed ([#26](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/26))
+- Setup wizard now accepts Linux and allows users to proceed ([#26](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/26)) — **CI-only**
   - Previously showed "Blocked" / "Cannot continue" for all Linux users
   - Now passes OS check and displays "Ubuntu 22.04+ (experimental)"
   - Linux with integrated GPU uses system RAM for VRAM grading
+- Flaky X11 screenshot test under Xvfb waits for the window to map and polls for a non-blank frame ([#24](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/24)) — **CI-only**
 
 ### Known Issues
-- Backend requires interactive setup wizard completion before starting on first launch
-  - Setup wizard fix (e73b4f7): Linux now passes OS check, can proceed through setup ✅
-  - Backend spawn is gated on `setup_complete.json`
-  - Setup includes: Python 3.11+ installation, Ollama models, Python dependencies
-  - After first-run setup completes, backend auto-starts on subsequent launches
-- Python runtime not bundled - requires system Python 3.11+ (see README.md)
-- Unsigned installers trigger SmartScreen/Gatekeeper warnings on first install
+- Python is **not bundled**. The packaged app spawns `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH. `requirements.txt` does not pin a Python version. CI uses Python 3.12. See README.md for wizard behavior when Python is missing.
+- Backend spawn is gated on `setup_complete.json` (first-run wizard). The release dry-run pre-seeds that file and stubs Ollama so it can probe HTTP `/health`. Until that dry-run returns 200 on a platform, this changelog does not claim the backend works there.
+- Unsigned installers trigger SmartScreen/Gatekeeper warnings on first install.
+- No **real machine** testing of capture, chat, or setup for this fork.
 
 ## [2.0.0] - 2024-10-09
 

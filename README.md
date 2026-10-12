@@ -61,23 +61,26 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 | System RAM | 8 GB | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
-| **Python runtime** | **Python 3.11+** (system installation, not bundled) | **Python 3.12** |
+| **Python runtime** | System Python on PATH (not bundled). Wizard copy says 3.9+; Windows auto-install uses 3.11; CI uses 3.12 | **Python 3.12** |
 
-**Python requirement:** Clippy Vision requires a system Python 3.11 or later installation. Python is NOT bundled in the installer.
+**Python is not bundled** in the Windows installer or Linux AppImage. `requirements.txt` does not pin a Python version. The packaged app runs `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH (`electron-ui/electron/lib/paths.js`). CI unit tests and the release dry-run install Python 3.12.
 
-- **Windows:** The setup wizard will attempt to install Python 3.11 automatically via winget if not found. You can also install manually from [python.org](https://www.python.org/downloads/) and ensure it's on your PATH.
-- **Linux:** Install Python 3.11+ via your package manager: `sudo apt install python3.11 python3-pip` (Ubuntu/Debian) or equivalent.
-- **macOS:** The setup wizard will attempt to install Python via Homebrew if not found and Homebrew is installed. You can also install manually from [python.org](https://www.python.org/downloads/) or Homebrew: `brew install python@3.11`.
+**When Python is missing, the setup wizard (`electron-ui/electron/lib/setup.js`) does this:**
+- It runs `--version` on that interpreter. Preflight text says "Clippy needs Python 3.9+ on PATH."
+- **Windows:** tries `winget install Python.Python.3.11 --silent`. Fail → install from python.org. Installed but not on PATH → restart required.
+- **macOS and Linux:** tries Homebrew `brew install python` if Homebrew is present. If that fails: "Install Python 3.11+ from python.org or Homebrew, then retry" / "Install Python 3.11+ and make sure it is on PATH." The wizard does not apt-install Python on Linux.
 
-**Advanced:** To use a specific Python interpreter or virtual environment, set the `CLIPPY_PYTHON` environment variable to the full path of your `python` or `python3` executable before launching Clippy. For example:
-```bash
-export CLIPPY_PYTHON=/path/to/venv/bin/python3   # Linux/macOS
-set CLIPPY_PYTHON=C:\path\to\python.exe          # Windows
+**Advanced:** point Clippy at a specific interpreter before launch:
+
+```powershell
+$env:CLIPPY_PYTHON = "C:\path\to\python.exe"
 ```
 
-When Python is missing, the setup wizard will show an error message asking you to install Python 3.11+ and ensure it's on your PATH, then retry setup.
+```bash
+export CLIPPY_PYTHON=/path/to/venv/bin/python3
+```
 
-**Linux support (experimental):** Capture runs with limited features. On **X11**, screenshots use `mss` (optional crop to the focused window via `xdotool`). On **native Wayland**, screenshots are skipped until xdg-desktop-portal support lands (blank XWayland grabs are not stored); wlroots users can install `grim` for captures. Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text and installers are not implemented yet.
+**Linux support (experimental):** Capture runs with limited features. On **X11**, screenshots use `mss` (optional crop to the focused window via `xdotool`). On **native Wayland**, screenshots are skipped until xdg-desktop-portal support lands (blank XWayland grabs are not stored); wlroots users can install `grim` for captures. Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented ([#20](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/20)); it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI.
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
@@ -111,7 +114,7 @@ Build from source: [CONTRIBUTING.md](CONTRIBUTING.md#building-from-source)
 - Capture, summarization, and storage run locally on this computer.
 - Connected cloud agents can receive retrieved memory through MCP tool replies.
 - Connected clients have access to all exposed Clippy tools.
-- Redaction is best effort. Private-browsing protection covers only Google Chrome, Microsoft Edge, and Brave.
+- Redaction is best effort. Private-browsing protection covers Chrome, Edge, and Brave (inherited), plus Firefox/Opera/Vivaldi on Windows ([#8](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/8), CI unit tests only). Linux has no private-window detection.
 - You can pause capture and delete stored activity from the tray or timeline.
 
 Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usage.md#privacy-settings).
