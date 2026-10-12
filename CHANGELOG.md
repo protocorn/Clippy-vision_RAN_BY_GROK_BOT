@@ -36,7 +36,7 @@ Verification labels used below:
 - Live progress while the setup wizard downloads Ollama models ([#19](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/19)) — **CI-only** (parser tests; wizard UI itself is not driven in CI)
 - Captured screen text marked untrusted in MCP replies and in-app chat ([#27](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/27)) — **CI-only**
 - CI testing on Ubuntu and Windows ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7)) — **CI-only**
-- Unsigned Windows NSIS installer and Linux AppImage release workflow with PR dry-run ([#15](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/15), this PR) — build + launch checks; see Known Issues for `/health`
+- Unsigned Windows NSIS installer and Linux AppImage release workflow with PR dry-run ([#15](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/15), this PR) — **Xvfb launch** and **Windows silent install**: packaged app spawned the backend and `GET /health` returned 200 `{"status":"ok"}` ([run 38258155536](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/actions/runs/38258155536) on `e9dd9c9`). Setup was pre-seeded and Ollama stubbed; not a real-machine test.
 - MCP setup guides ([#9](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/9), [#13](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/13))
 - Issue and pull request templates ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7))
 
@@ -56,7 +56,7 @@ Verification labels used below:
 
 ### Known Issues
 - Python is **not bundled**. The packaged app spawns `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH. `requirements.txt` does not pin a Python version. CI uses Python 3.12. See README.md for wizard behavior when Python is missing.
-- Backend spawn is gated on `setup_complete.json` (first-run wizard). The release dry-run pre-seeds that file and stubs Ollama so it can probe HTTP `/health`. Until that dry-run returns 200 on a platform, this changelog does not claim the backend works there.
+- Backend spawn is gated on `setup_complete.json` (first-run wizard). The release dry-run pre-seeds that file and stubs Ollama. With that bypass, `GET /health` returned 200 `{"status":"ok"}` on Linux (Xvfb AppImage, port 38199) and Windows (silent NSIS install, port 54951) in [run 38258155536](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/actions/runs/38258155536). That does not cover the wizard, Ollama, a real model, or a real desktop.
 - Unsigned installers trigger SmartScreen/Gatekeeper warnings on first install.
 - No **real machine** testing of capture, chat, or setup for this fork.
 
