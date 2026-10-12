@@ -2,12 +2,34 @@
 Test OS check in hardware.js supports Linux as experimental platform.
 """
 import json
+import os
 import platform
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+
+def _node_subprocess_timeout():
+    """Seconds allowed for a node spawn. Override with CLIPPY_NODE_TEST_TIMEOUT."""
+    raw = os.environ.get("CLIPPY_NODE_TEST_TIMEOUT", "60")
+    try:
+        timeout = float(raw)
+    except ValueError:
+        timeout = 60.0
+    return timeout
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _warmup_node():
+    """Windows CI can take >10s for the first node.exe spawn (AV / cold cache)."""
+    subprocess.run(
+        ["node", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=_node_subprocess_timeout(),
+    )
 
 
 @pytest.fixture
@@ -71,7 +93,7 @@ def test_os_check_passes_on_current_platform(test_script):
         ['node', str(test_script)],
         capture_output=True,
         text=True,
-        timeout=10
+        timeout=_node_subprocess_timeout(),
     )
     
     assert result.returncode == 0, f"Node script failed: {result.stderr}"
