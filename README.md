@@ -114,7 +114,7 @@ Build from source: [CONTRIBUTING.md](CONTRIBUTING.md#building-from-source)
 - Capture, summarization, and storage run locally on this computer.
 - Connected cloud agents can receive retrieved memory through MCP tool replies.
 - Connected clients have access to all exposed Clippy tools.
-- Redaction is best effort. Private-browsing protection covers Chrome, Edge, and Brave (inherited), plus Firefox/Opera/Vivaldi on Windows ([#8](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/8), CI unit tests only). Linux has no private-window detection.
+- Redaction is best effort. Private-browsing detection is on by default: Chrome, Edge, and Brave on Windows and macOS; Firefox and Opera on Windows (and attempted but untested on macOS); Vivaldi on Windows. Vivaldi, Safari, and Linux are not covered. See the [coverage table](docs/usage.md#private-browsing).
 - You can pause capture and delete stored activity from the tray or timeline.
 
 Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usage.md#privacy-settings).

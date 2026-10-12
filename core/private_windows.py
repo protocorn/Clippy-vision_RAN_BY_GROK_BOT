@@ -1,8 +1,10 @@
-"""Detect a private Chrome, Edge, or Brave window from its accessibility tree.
+"""Detect a private Chrome, Edge, Brave, Opera, Vivaldi, or Firefox window.
 
-The visible window title drops the private-mode word once a page loads, or
-keeps it only in a form that also appears on ordinary pages. The browser's
-root pane keeps a stable accessible name.
+On Windows the Chromium-family browsers (Chrome, Edge, Brave, Opera and
+Vivaldi) are detected from the accessibility tree: the visible window title
+drops the private-mode word once a page loads, or keeps it only in a form
+that also appears on ordinary pages, but the browser's root pane keeps a
+stable accessible name.
 
 A private window ends with the brand and a parenthetical label, in whatever
 language that label uses:
@@ -21,6 +23,12 @@ profile name. Parentheses in that profile name are not the private label.
 Chrome and Edge call the pane ``BrowserRootView``. Brave calls it
 ``BraveBrowserRootView``. The window class is ``Chrome_WidgetWin_1`` for
 all three, so the class is not the signal.
+
+Firefox is detected separately, from "Private Browsing" markers in the
+accessibility tree. On macOS the front window's mode is read with AppleScript
+(Chrome, Edge, Brave, Firefox and Opera; Vivaldi is not mapped). On Linux,
+private-window detection is not implemented and this module always returns
+False.
 """
 
 from __future__ import annotations
