@@ -120,7 +120,7 @@
       ],
       "icon": "assets/icon.png",
       "category": "Utility",
-      "artifactName": "ClippyVision-Linux-${arch}-${version}.${ext}"
+      "artifactName": "ClippyVision-Linux-x86_64-${version}.${ext}"
     },
     "asar": true
   },
