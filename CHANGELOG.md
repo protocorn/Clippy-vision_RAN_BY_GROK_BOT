@@ -38,7 +38,7 @@ Verification labels used below:
 - Honor OS-level window capture opt-outs ([#28](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/28)) — **CI-only** (mocked Win32 `GetWindowDisplayAffinity`, macOS window-sharing state, Linux no-op plus process-name fallback). **Not real machine.** Linux has no per-window OS capture API.
 - VS Code MCP setup guide ([#29](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/29), [@Afrin-banu-A](https://github.com/Afrin-banu-A)) — documentation; the author marked the setup steps as not verified on a real VS Code install
 - CI testing on Ubuntu and Windows ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7)) — **CI-only**
-- Unsigned Windows NSIS installer and Linux AppImage release workflow with PR dry-run ([#15](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/15), this PR) — **Xvfb launch** and **Windows silent install**: packaged app spawned the backend and `GET /health` returned 200 `{"status":"ok"}` ([run 38258155536](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/actions/runs/38258155536) on `e9dd9c9`). Setup was pre-seeded and Ollama stubbed; not a real-machine test.
+- Unsigned Windows NSIS installer and Linux AppImage release workflow with PR dry-run ([#15](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/15), this PR) — **Xvfb launch** and **Windows silent install**: packaged app spawned the backend and `GET /health` returned 200 `{"status":"ok"}` ([run 38286025883](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/actions/runs/38286025883) on `d068c49`, which includes #28/#29/#32). Setup was pre-seeded and Ollama stubbed; not a real-machine test.
 - MCP setup guides ([#9](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/9), [#13](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/13), [#29](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/29))
 - Issue and pull request templates ([#7](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/7))
 
@@ -59,7 +59,7 @@ Verification labels used below:
 
 ### Known Issues
 - Python is **not bundled**. The packaged app spawns `CLIPPY_PYTHON` if set, otherwise `python3` (Linux/macOS) or `python` (Windows) from PATH. `requirements.txt` does not pin a Python version. CI uses Python 3.12. See README.md for wizard behavior when Python is missing.
-- Backend spawn is gated on `setup_complete.json` (first-run wizard). The release dry-run pre-seeds that file and stubs Ollama. With that bypass, `GET /health` returned 200 `{"status":"ok"}` on Linux (Xvfb AppImage, port 38199) and Windows (silent NSIS install, port 54951) in [run 38258155536](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/actions/runs/38258155536). That does not cover the wizard, Ollama, a real model, or a real desktop.
+- Backend spawn is gated on `setup_complete.json` (first-run wizard). The release dry-run pre-seeds that file and stubs Ollama. With that bypass, `GET /health` returned 200 `{"status":"ok"}` on Linux (Xvfb AppImage, port 39367) and Windows (silent NSIS install, port 61677) in [run 38286025883](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/actions/runs/38286025883). That does not cover the wizard, Ollama, a real model, or a real desktop.
 - Unsigned installers trigger SmartScreen/Gatekeeper warnings on first install.
 - No **real machine** testing of capture, chat, or setup for this fork.
 
