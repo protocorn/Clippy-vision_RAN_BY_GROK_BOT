@@ -277,6 +277,12 @@ contextBridge.exposeInMainWorld('clippy', {
         return response.json()
     },
 
+    getDiagnostics: async () => {
+        const response = await fetch(await apiUrl('/settings/diagnostics'))
+        if (!response.ok) throw new Error(await getErrorMessage(response))
+        return response.json()
+    },
+
     clearData: async (scopes) => {
         const response = await fetch(await apiUrl('/settings/data/clear'), {
             method: 'POST',

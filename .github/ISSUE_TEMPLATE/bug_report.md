@@ -31,6 +31,13 @@ If applicable, add screenshots to help explain your problem.
 - **Python version**: [if known, run `python --version`]
 - **Ollama version**: [if known, run `ollama --version`]
 
+## Diagnostics
+Settings → About → Copy diagnostics, then paste here.
+
+```
+
+```
+
 ## Logs
 If applicable, paste relevant error messages or logs here.
 
