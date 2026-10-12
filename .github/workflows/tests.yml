@@ -7,6 +7,21 @@ on:
     branches: [main]
 
 jobs:
+  electron-mcp-paths:
+    name: Electron MCP paths on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run MCP config path tests
+        working-directory: electron-ui
+        run: node --test electron/lib/mcp.test.js
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
