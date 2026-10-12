@@ -322,7 +322,6 @@ def on_paste_event(paste_event: PasteEvent):
         return
     
     _last_paste_time = time.time()
-    window_context = _safe_window_metadata(paste_event.get("window_context"))
     content = get_clipboard_text()
     event = Event(
         event_id=str(uuid.uuid4()),
