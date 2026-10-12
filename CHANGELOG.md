@@ -5,7 +5,23 @@ All notable changes to this project (the Grok Bot fork of Clippy Vision) will be
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2.1.0] - Unreleased
+## [Unreleased]
+
+Post-v2.1.0 work on main. Verification is **CI-only** unless a line says otherwise. Nothing below is **real machine** tested. The published v2.1.0 Windows installer and Linux AppImage were not rebuilt.
+
+### Added
+- Chat retrieval-time privacy (password-manager process opt-out, private/redacted/Clippy windows, selected-apps mode, private sessions; drop the event if a privacy check raises), NULL-safe prompt fields, session lookback from local midnight with 60-minute events, and untrusted/no-guess prompt instructions ([#34](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/34), part of [#6](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/issues/6)) — **CI-only** (pytest chat context and endpoints on ubuntu-latest and windows-latest). Does not start Ollama.
+
+### Changed
+- Contributor guide now documents the CI pytest and Electron `node --test` commands ([#36](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/36), closes [#18](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/issues/18)) — documentation. Author started the Windows-filtered command locally but did not finish a green run; no Linux/macOS verification on that PR.
+- VS Code MCP guide now states that one-click Connect writes a `clippy-vision` entry under `servers` to the per-OS user `mcp.json`, then opens `vscode:mcp/install` ([#37](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/37), follow-up to [#32](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/32)) — documentation. Path logic is **CI-only** (`mcp.test.js`); Connect was not clicked in VS Code.
+- Reuse already-computed window context and foreground hwnd lookups; pin Node 20 for the Electron MCP CI job ([#39](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/39)) — **CI-only**. That PR claimed no behavior change and did not re-run the Xvfb screenshot test.
+
+### Fixed
+- Chat prompt crash on SQL NULL `active_task` / `summary` / `ocr_text`; `/chat` and `/chat/stream` return a user-facing message when the model is missing instead of a 500 ([#34](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/34)) — **CI-only**.
+- Electron preflight parses `python --version` and requires Python 3.11+ ([#38](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/38)) — **CI-only** (`node --test` of `setup.test.js` and `mcp.test.js`). Not in the published v2.1.0 installer or AppImage.
+
+## [2.1.0] - 2026-10-12
 
 First release of the Grok Bot fork. Adds experimental Linux support, in-app chat, expands browser privacy detection, and establishes CI plus unsigned installer dry-runs.
 
@@ -70,5 +86,6 @@ This is the fork point. All changes above are additions made by the Grok Bot for
 
 For changes prior to the fork, see the [upstream Clippy Vision repository](https://github.com/protocorn/clippy-vision).
 
-[2.1.0]: https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/compare/8271941...HEAD
+[Unreleased]: https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/compare/8271941...v2.1.0
 [2.0.0]: https://github.com/protocorn/clippy-vision/releases/tag/v2.0.0
