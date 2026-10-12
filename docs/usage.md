@@ -31,17 +31,25 @@ Apps you list under privacy are blacked out whenever they are visible, not only 
 
 ### Private browsing
 
-Private browsing protection is on by default for **Google Chrome**, **Microsoft Edge**, and **Brave** on Windows and macOS:
+Private browsing protection is on by default. When a private window is detected, Clippy:
 
-- The window is painted black.
-- The address is not stored.
-- The title is saved as "Private window".
+- paints the window black,
+- does not store the address,
+- saves the title as "Private window".
 
-Chrome (Incognito), Edge (InPrivate), and Brave (Private) are covered on Windows and macOS. Firefox Private Browsing, Opera, and Vivaldi are covered on Windows.
+Coverage depends on the operating system. "Untested" means detection is attempted but has not been verified on that platform:
 
-Safari private windows are not covered on macOS.
+| Browser (private mode) | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| Google Chrome (Incognito) | Covered | Covered | Not yet |
+| Microsoft Edge (InPrivate) | Covered | Covered | Not yet |
+| Brave (Private) | Covered | Covered | Not yet |
+| Firefox (Private Browsing) | Covered | Untested | Not yet |
+| Opera | Covered | Untested | Not yet |
+| Vivaldi | Covered | Not covered | Not yet |
+| Safari | Not covered | Not covered | Not yet |
 
-Firefox, Opera, and Safari are not covered. Pause capture when those private windows must not be stored.
+Windows detection is exercised by unit tests in CI only. On Linux there is no private-window detection yet, so a private window is captured like any other. Pause capture when a private window must not be stored.
 
 ### What the privacy layer does
 
