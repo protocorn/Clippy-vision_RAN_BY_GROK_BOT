@@ -2,6 +2,34 @@ const path = require('path')
 const fs   = require('fs')
 const http = require('http')
 
+const MIN_PYTHON_MAJOR = 3
+const MIN_PYTHON_MINOR = 11
+
+function evaluatePythonVersion(output) {
+    const text = String(output == null ? '' : output)
+    const match = text.match(/Python\s+(\d+)\.(\d+)(?:\.(\d+))?/i)
+    if (!match) {
+        const preview = text.trim() || '(empty)'
+        return {
+            ok: false,
+            version: null,
+            message: `Could not parse Python version from '${preview}'. Python 3.11+ is required.`,
+        }
+    }
+    const major = Number(match[1])
+    const minor = Number(match[2])
+    const patch = match[3] === undefined ? 0 : Number(match[3])
+    const version = match[3] === undefined ? `${major}.${minor}` : `${major}.${minor}.${patch}`
+    if (major > MIN_PYTHON_MAJOR || (major === MIN_PYTHON_MAJOR && minor >= MIN_PYTHON_MINOR)) {
+        return { ok: true, version, message: null }
+    }
+    return {
+        ok: false,
+        version,
+        message: `Python ${version} was found, but Python 3.11+ is required.`,
+    }
+}
+
 function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunched }) {
     const {
         ROOT,
@@ -120,7 +148,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         const copy = {
             python: {
                 title: 'Python is missing',
-                detail: 'Clippy needs Python 3.9+ on PATH. Install it, then continue.',
+                detail: 'Clippy needs Python 3.11+ on PATH. Install it, then continue.',
             },
             ollama: {
                 title: 'Ollama is not installed',
@@ -186,19 +214,31 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return true
     }
 
+    function acceptPythonVersion(raw) {
+        const check = evaluatePythonVersion(raw)
+        if (check.ok) {
+            const label = String(raw || '').trim() || `Python ${check.version}`
+            log(label, 'ok')
+            markDone('python', label)
+            return true
+        }
+        log(check.message, 'err')
+        stepUpdate('python', 'error', check.message)
+        return false
+    }
+
     async function stepCheckPython() {
         // Windows installs a missing Python with winget. macOS uses Homebrew
         // when Homebrew is already installed. Linux stays a manual install.
-        stepUpdate('python', 'running', 'Checking for Python 3.9+...')
+        stepUpdate('python', 'running', 'Checking for Python 3.11+...')
         log('> python --version', 'dim')
 
         const { code, stdout, stderr } = await runCommand(PYTHON_COMMAND, ['--version'])
         const version = stdout || stderr
 
         if (code === 0 && version) {
-            log(version, 'ok')
-            markDone('python', version)
-            return
+            if (acceptPythonVersion(version)) return
+            throw new Error('python-version-required')
         }
 
         if (process.platform !== 'win32') {
@@ -209,9 +249,8 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                 const verify = await runCommand(PYTHON_COMMAND, ['--version'])
                 const verifiedVersion = verify.stdout || verify.stderr
                 if (verify.code === 0 && verifiedVersion) {
-                    log(verifiedVersion, 'ok')
-                    markDone('python', verifiedVersion)
-                    return
+                    if (acceptPythonVersion(verifiedVersion)) return
+                    throw new Error('python-version-required')
                 }
             }
             log('Python was not found on PATH. Install Python 3.11+ from python.org or Homebrew, then retry.', 'err')
@@ -244,8 +283,8 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         }
 
         const verifiedVersion = verify.stdout || verify.stderr || 'Python installed.'
-        log(verifiedVersion, 'ok')
-        markDone('python', verifiedVersion)
+        if (acceptPythonVersion(verifiedVersion)) return
+        throw new Error('python-version-required')
     }
 
     async function stepCheckOllama() {
@@ -652,6 +691,10 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         if (py.code !== 0) {
             return describePreflightFailure('python', 'Python not found or not on PATH.')
         }
+        const pyCheck = evaluatePythonVersion(py.stdout || py.stderr)
+        if (!pyCheck.ok) {
+            return describePreflightFailure('python', pyCheck.message)
+        }
 
         if (!managedOllama) {
             if (!(await ollamaReachable(3, 500))) {
@@ -809,4 +852,4 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
     }
 }
 
-module.exports = { createSetup }
+module.exports = { createSetup, evaluatePythonVersion }

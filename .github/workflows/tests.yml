@@ -20,7 +20,7 @@ jobs:
 
       - name: Run MCP config path tests
         working-directory: electron-ui
-        run: node --test electron/lib/mcp.test.js
+        run: node --test electron/lib/mcp.test.js electron/lib/setup.test.js
 
   test:
     name: Test on ${{ matrix.os }}
