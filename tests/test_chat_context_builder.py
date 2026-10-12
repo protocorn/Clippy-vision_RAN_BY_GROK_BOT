@@ -480,3 +480,25 @@ def test_build_recent_context_filters_redacted_apps():
 
         assert len(context["events"]) == 1
         assert context["events"][0]["process_name"] == "code"
+
+
+def test_build_recent_context_drops_event_when_privacy_check_raises():
+    """A privacy/opt-out check that raises must exclude that event (fail closed)."""
+    def private_or_raise(proc, title):
+        if "flaky" in (proc or "").lower():
+            raise RuntimeError("privacy lookup failed")
+        return False
+
+    with patch("core.chat_context.conn") as mock_conn, \
+         patch("core.chat_context.event_is_private", side_effect=private_or_raise):
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("context_change", "flaky.exe", "Unknown", None,
+             "Should be dropped", None, "2026-10-11 15:10:00"),
+            ("context_change", "code", "main.py - VS Code", None,
+             "Editing", None, "2026-10-11 15:11:00"),
+        ]
+
+        context = build_recent_context()
+
+        assert len(context["events"]) == 1
+        assert context["events"][0]["process_name"] == "code"

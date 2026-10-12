@@ -35,23 +35,17 @@ def event_excluded_from_chat(process_name: str, window_title: str) -> bool:
     """True when a stored event must not appear in the chat prompt."""
     process_name = process_name or ""
     window_title = window_title or ""
-    if root_name_is_private(window_title, process_name):
-        return True
     try:
+        if root_name_is_private(window_title, process_name):
+            return True
         if process_is_capture_opted_out(process_name):
             return True
-    except Exception:
-        pass
-    try:
         if event_is_private(process_name, window_title):
             return True
-    except Exception:
-        pass
-    try:
         if not should_watch_process(process_name):
             return True
     except Exception:
-        pass
+        return True
     return False
 
 
