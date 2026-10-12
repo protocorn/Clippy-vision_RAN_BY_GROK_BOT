@@ -82,6 +82,15 @@ def _is_private_process(process_name: str) -> bool:
     return _password_manager_key(process_name) in PASSWORD_MANAGERS
 
 
+def process_is_capture_opted_out(process_name: str) -> bool:
+    """True when capture always skips this process (password managers).
+
+    OS-level per-window opt-out cannot be reconstructed from stored events.
+    This is the durable process-name signal that retrieval can still honor.
+    """
+    return _is_private_process(process_name)
+
+
 def _read_window_display_affinity(hwnd: int) -> int | None:
     """Return GetWindowDisplayAffinity, or None when the call fails."""
     try:
