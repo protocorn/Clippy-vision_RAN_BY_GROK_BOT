@@ -155,6 +155,25 @@ async function refinePlatformLabel() {
  } catch (_) { /* keep fallback */ }
 }
 
+async function writeClipboardText(text) {
+ if (navigator.clipboard?.writeText) {
+  try {
+   await navigator.clipboard.writeText(text)
+   return
+  } catch (_) { /* fall through to execCommand */ }
+ }
+ const ta = document.createElement('textarea')
+ ta.value = text
+ ta.setAttribute('readonly', '')
+ ta.style.position = 'fixed'
+ ta.style.left = '-9999px'
+ document.body.appendChild(ta)
+ ta.select()
+ const ok = document.execCommand('copy')
+ ta.remove()
+ if (!ok) throw new Error('Clipboard is not available.')
+}
+
 function wireDiagnosticsCopy() {
  const button = document.getElementById('diagnostics-copy-btn')
  if (!button || button.dataset.wired === '1') return
@@ -173,10 +192,7 @@ export async function copyDiagnostics() {
   }
   const data = await window.clippy.getDiagnostics()
   const text = JSON.stringify(data, null, 2)
-  if (!navigator.clipboard?.writeText) {
-   throw new Error('Clipboard is not available.')
-  }
-  await navigator.clipboard.writeText(text)
+  await writeClipboardText(text)
   setStatus(status, 'Copied', 'ok')
   setTimeout(() => setStatus(status, '', null), 2000)
  } catch (error) {

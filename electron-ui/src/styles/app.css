@@ -1932,6 +1932,8 @@
  padding: 0;
  cursor: pointer;
  font: inherit;
+ white-space: nowrap;
+ flex-shrink: 0;
  }
 
  button.mcp-copy-btn:disabled,
