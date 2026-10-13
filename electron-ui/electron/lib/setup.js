@@ -1,5 +1,6 @@
 const path = require('path')
 const fs   = require('fs')
+const os   = require('os')
 const http = require('http')
 
 const MIN_PYTHON_MAJOR = 3
@@ -32,27 +33,69 @@ function evaluatePythonVersion(output) {
 
 const LINUX_OLLAMA_INSTALL_COMMAND = 'curl -fsSL https://ollama.com/install.sh | sh'
 const LINUX_OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download/linux'
+const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download'
+const PYTHON_DOWNLOAD_URL = 'https://www.python.org/downloads/'
+const WINGET_PYTHON_ARGS = [
+    'install', 'Python.Python.3.11',
+    '--silent',
+    '--accept-package-agreements',
+    '--accept-source-agreements',
+]
+const WINGET_OLLAMA_ARGS = [
+    'install', 'Ollama.Ollama',
+    '--silent',
+    '--accept-package-agreements',
+    '--accept-source-agreements',
+]
+const ALLOWED_SETUP_DOWNLOAD_URLS = new Set([
+    LINUX_OLLAMA_DOWNLOAD_URL,
+    OLLAMA_DOWNLOAD_URL,
+    'https://ollama.com/download/mac',
+    'https://ollama.com/download/windows',
+    PYTHON_DOWNLOAD_URL,
+])
 
-function decideOllamaInstall({ platform, userConsent } = {}) {
+function pathModFor(platform) {
+    return platform === 'win32' ? path.win32 : path.posix
+}
+
+function decideOllamaInstall({ platform, userConsent, brewAvailable, wingetAvailable } = {}) {
     if (platform === 'win32') {
+        if (wingetAvailable === false) {
+            return {
+                action: 'manual',
+                runInstall: false,
+                command: null,
+                args: null,
+                downloadUrl: OLLAMA_DOWNLOAD_URL,
+                instructions: `Ollama was not found and winget is not available. Install it from ${OLLAMA_DOWNLOAD_URL}, then retry.`,
+            }
+        }
         return {
             action: 'winget',
             runInstall: true,
             command: 'winget',
-            args: [
-                'install', 'Ollama.Ollama',
-                '--silent',
-                '--accept-package-agreements',
-                '--accept-source-agreements',
-            ],
+            args: WINGET_OLLAMA_ARGS.slice(),
+            downloadUrl: OLLAMA_DOWNLOAD_URL,
         }
     }
     if (platform === 'darwin') {
+        if (brewAvailable === false) {
+            return {
+                action: 'manual',
+                runInstall: false,
+                command: null,
+                args: null,
+                downloadUrl: OLLAMA_DOWNLOAD_URL,
+                instructions: `Ollama was not found and Homebrew is not installed. Install it from ${OLLAMA_DOWNLOAD_URL}, then retry.`,
+            }
+        }
         return {
             action: 'homebrew',
             runInstall: true,
             command: 'brew',
             args: ['install', 'ollama'],
+            downloadUrl: OLLAMA_DOWNLOAD_URL,
         }
     }
     if (platform === 'linux') {
@@ -89,18 +132,169 @@ function decideOllamaInstall({ platform, userConsent } = {}) {
     }
 }
 
-function ollamaInstallCommandToRun(plan) {
+function decidePythonInstall({ platform, brewAvailable, wingetAvailable } = {}) {
+    if (platform === 'linux') {
+        return {
+            action: 'linux-manual',
+            runInstall: false,
+            command: null,
+            args: null,
+            downloadUrl: PYTHON_DOWNLOAD_URL,
+            instructions: `Python 3.11+ was not found. Install it from ${PYTHON_DOWNLOAD_URL}, then retry. The wizard does not install Python on Linux.`,
+        }
+    }
+    if (platform === 'darwin') {
+        if (brewAvailable === false) {
+            return {
+                action: 'manual',
+                runInstall: false,
+                command: null,
+                args: null,
+                downloadUrl: PYTHON_DOWNLOAD_URL,
+                instructions: `Python 3.11+ was not found and Homebrew is not installed. Install it from ${PYTHON_DOWNLOAD_URL}, then retry.`,
+            }
+        }
+        return {
+            action: 'homebrew',
+            runInstall: true,
+            command: 'brew',
+            args: ['install', 'python'],
+            downloadUrl: PYTHON_DOWNLOAD_URL,
+        }
+    }
+    if (platform === 'win32') {
+        if (wingetAvailable === false) {
+            return {
+                action: 'manual',
+                runInstall: false,
+                command: null,
+                args: null,
+                downloadUrl: PYTHON_DOWNLOAD_URL,
+                instructions: `Python 3.11+ was not found and winget is not available. Install it from ${PYTHON_DOWNLOAD_URL}, then retry.`,
+            }
+        }
+        return {
+            action: 'winget',
+            runInstall: true,
+            command: 'winget',
+            args: WINGET_PYTHON_ARGS.slice(),
+            downloadUrl: PYTHON_DOWNLOAD_URL,
+        }
+    }
+    return {
+        action: 'unsupported',
+        runInstall: false,
+        command: null,
+        args: null,
+        downloadUrl: PYTHON_DOWNLOAD_URL,
+    }
+}
+
+function installCommandToRun(plan) {
     if (!plan || !plan.runInstall || !plan.command) return null
     return { command: plan.command, args: Array.isArray(plan.args) ? plan.args : [] }
 }
 
-function linuxOllamaMissingError(message) {
-    const err = new Error('ollama-install-required')
-    err.offerLinuxInstall = true
-    err.stepSub = message || (
-        `Install Ollama first. Official command: ${LINUX_OLLAMA_INSTALL_COMMAND} — ${LINUX_OLLAMA_DOWNLOAD_URL}`
-    )
+function ollamaInstallCommandToRun(plan) {
+    return installCommandToRun(plan)
+}
+
+function knownOllamaInstallPaths({ platform, env = {}, home = '' } = {}) {
+    const p = pathModFor(platform)
+    if (platform === 'win32') {
+        const localAppData = env.LOCALAPPDATA || p.join(home || 'C:\\Users\\Default', 'AppData', 'Local')
+        const programFiles = env.ProgramFiles || 'C:\\Program Files'
+        return [
+            p.join(localAppData, 'Programs', 'Ollama', 'ollama.exe'),
+            p.join(programFiles, 'Ollama', 'ollama.exe'),
+        ]
+    }
+    if (platform === 'darwin') {
+        return [
+            '/opt/homebrew/bin/ollama',
+            '/usr/local/bin/ollama',
+            p.join(home, '.local', 'bin', 'ollama'),
+        ]
+    }
+    return [
+        '/usr/local/bin/ollama',
+        '/usr/bin/ollama',
+        p.join(home, '.local', 'bin', 'ollama'),
+    ]
+}
+
+function knownPythonInstallPaths({ platform, env = {}, home = '' } = {}) {
+    const p = pathModFor(platform)
+    if (platform === 'win32') {
+        const localAppData = env.LOCALAPPDATA || p.join(home || 'C:\\Users\\Default', 'AppData', 'Local')
+        const programFiles = env.ProgramFiles || 'C:\\Program Files'
+        const versions = ['Python313', 'Python312', 'Python311']
+        const out = []
+        for (const ver of versions) {
+            out.push(p.join(localAppData, 'Programs', 'Python', ver, 'python.exe'))
+            out.push(p.join(programFiles, ver, 'python.exe'))
+        }
+        out.push('C:\\Python313\\python.exe', 'C:\\Python312\\python.exe', 'C:\\Python311\\python.exe')
+        return out
+    }
+    if (platform === 'darwin') {
+        return [
+            '/opt/homebrew/bin/python3',
+            '/usr/local/bin/python3',
+            '/usr/bin/python3',
+        ]
+    }
+    return [
+        '/usr/bin/python3',
+        '/usr/local/bin/python3',
+        p.join(home, '.local', 'bin', 'python3'),
+    ]
+}
+
+function firstExistingPath(candidates, existsFn) {
+    if (typeof existsFn !== 'function') return null
+    for (const candidate of candidates || []) {
+        if (candidate && existsFn(candidate)) return candidate
+    }
+    return null
+}
+
+function parseWindowsRegPathValue(output) {
+    const match = String(output || '').match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im)
+    return match ? match[1].trim() : ''
+}
+
+function mergePathDirectories(chunks, delimiter) {
+    const sep = delimiter || path.delimiter
+    const seen = new Set()
+    const out = []
+    for (const chunk of chunks || []) {
+        for (const part of String(chunk || '').split(sep)) {
+            const trimmed = part.trim()
+            if (!trimmed) continue
+            const key = trimmed.toLowerCase()
+            if (seen.has(key)) continue
+            seen.add(key)
+            out.push(trimmed)
+        }
+    }
+    return out.join(sep)
+}
+
+function setupManualError(code, stepSub, extra = {}) {
+    const err = new Error(code)
+    err.stepSub = stepSub
+    if (extra.offerLinuxInstall) err.offerLinuxInstall = true
+    if (extra.downloadUrl) err.downloadUrl = extra.downloadUrl
     return err
+}
+
+function linuxOllamaMissingError(message) {
+    return setupManualError(
+        'ollama-install-required',
+        message || `Install Ollama first. Official command: ${LINUX_OLLAMA_INSTALL_COMMAND} — ${LINUX_OLLAMA_DOWNLOAD_URL}`,
+        { offerLinuxInstall: true, downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL },
+    )
 }
 
 function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunched, dialog, shell }) {
@@ -292,6 +486,83 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         return true
     }
 
+    function addDirToPath(dir) {
+        if (!dir) return
+        process.env.PATH = mergePathDirectories([dir, process.env.PATH], path.delimiter)
+    }
+
+    async function brewIsAvailable() {
+        const brew = await runCommand('brew', ['--prefix'])
+        return brew.code === 0
+    }
+
+    async function wingetIsAvailable() {
+        const winget = await runCommand('winget', ['--version'])
+        return winget.code === 0
+    }
+
+    async function refreshWindowsPathFromRegistry() {
+        if (process.platform !== 'win32') return
+        const machine = await runCommand('reg', [
+            'query',
+            'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+            '/v',
+            'Path',
+        ])
+        const user = await runCommand('reg', ['query', 'HKCU\\Environment', '/v', 'Path'])
+        const merged = mergePathDirectories([
+            parseWindowsRegPathValue(user.stdout || ''),
+            parseWindowsRegPathValue(machine.stdout || ''),
+            process.env.PATH,
+        ], ';')
+        if (merged) process.env.PATH = merged
+    }
+
+    async function verifyWithKnownPaths(command, extraCandidates, args = ['--version']) {
+        let result = await runCommand(command, args)
+        if (result.code === 0) return result
+        for (const candidate of extraCandidates || []) {
+            if (!candidate) continue
+            try {
+                if (!fs.existsSync(candidate)) continue
+            } catch (_) { continue }
+            addDirToPath(path.dirname(candidate))
+            result = await runCommand(candidate, args)
+            if (result.code === 0) return result
+        }
+        return result
+    }
+
+    function runtimeOllamaPaths() {
+        return knownOllamaInstallPaths({
+            platform: process.platform,
+            env: process.env,
+            home: os.homedir(),
+        })
+    }
+
+    function runtimePythonPaths() {
+        return knownPythonInstallPaths({
+            platform: process.platform,
+            env: process.env,
+            home: os.homedir(),
+        })
+    }
+
+    async function verifyOllamaAfterInstall() {
+        if (process.platform === 'win32') await refreshWindowsPathFromRegistry()
+        const extra = runtimeOllamaPaths()
+        extra.forEach((candidate) => addDirToPath(path.dirname(candidate)))
+        return verifyWithKnownPaths(OLLAMA_COMMAND, extra)
+    }
+
+    async function verifyPythonAfterInstall() {
+        if (process.platform === 'win32') await refreshWindowsPathFromRegistry()
+        const extra = runtimePythonPaths()
+        extra.forEach((candidate) => addDirToPath(path.dirname(candidate)))
+        return verifyWithKnownPaths(PYTHON_COMMAND, extra)
+    }
+
     function acceptPythonVersion(raw) {
         const check = evaluatePythonVersion(raw)
         if (check.ok) {
@@ -311,53 +582,74 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         stepUpdate('python', 'running', 'Checking for Python 3.11+...')
         log('> python --version', 'dim')
 
-        const { code, stdout, stderr } = await runCommand(PYTHON_COMMAND, ['--version'])
-        const version = stdout || stderr
+        const found = await verifyWithKnownPaths(PYTHON_COMMAND, runtimePythonPaths())
+        const version = found.stdout || found.stderr
 
-        if (code === 0 && version) {
+        if (found.code === 0 && version) {
             if (acceptPythonVersion(version)) return
             throw new Error('python-version-required')
         }
 
-        if (process.platform !== 'win32') {
+        const plan = decidePythonInstall({
+            platform: process.platform,
+            brewAvailable: process.platform === 'darwin' ? await brewIsAvailable() : undefined,
+            wingetAvailable: process.platform === 'win32' ? await wingetIsAvailable() : undefined,
+        })
+        const invocation = installCommandToRun(plan)
+
+        if (!invocation) {
+            log(plan.instructions || 'Python 3.11+ was not found.', 'err')
+            if (plan.downloadUrl) log(`Download: ${plan.downloadUrl}`, 'info')
+            throw setupManualError(
+                'python-install-required',
+                plan.instructions || `Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`,
+                { downloadUrl: plan.downloadUrl || PYTHON_DOWNLOAD_URL },
+            )
+        }
+
+        if (plan.action === 'homebrew') {
             log('Python not found. Trying Homebrew...', 'info')
             stepUpdate('python', 'running', 'Installing Python via Homebrew...')
             const installed = await installWithBrew('python')
             if (installed) {
-                const verify = await runCommand(PYTHON_COMMAND, ['--version'])
+                const verify = await verifyPythonAfterInstall()
                 const verifiedVersion = verify.stdout || verify.stderr
                 if (verify.code === 0 && verifiedVersion) {
                     if (acceptPythonVersion(verifiedVersion)) return
                     throw new Error('python-version-required')
                 }
             }
-            log('Python was not found on PATH. Install Python 3.11+ from python.org or Homebrew, then retry.', 'err')
-            stepUpdate('python', 'error', 'Install Python 3.11+ and make sure it is on PATH.')
-            throw new Error('python-install-required')
+            log(`Python was not found on PATH. Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`, 'err')
+            throw setupManualError(
+                'python-install-required',
+                `Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`,
+                { downloadUrl: PYTHON_DOWNLOAD_URL },
+            )
         }
-
 
         log('Python not found. Installing via winget...', 'info')
         stepUpdate('python', 'running', 'Installing Python 3.11 via winget...')
         log('> winget install Python.Python.3.11 --silent', 'dim')
 
-        const install = await runCommand('winget', [
-            'install', 'Python.Python.3.11',
-            '--silent',
-            '--accept-package-agreements',
-            '--accept-source-agreements',
-        ])
+        const install = await runCommand(invocation.command, invocation.args)
 
         if (install.code !== 0) {
             log(install.stderr || 'winget failed', 'err')
-            stepUpdate('python', 'error', 'Could not install Python. Please install manually from python.org')
-            throw new Error('python-install-failed')
+            log(`Install Python 3.11+ from ${PYTHON_DOWNLOAD_URL}, then retry.`, 'err')
+            throw setupManualError(
+                'python-install-failed',
+                `Could not install Python via winget. Install it from ${PYTHON_DOWNLOAD_URL}, then retry.`,
+                { downloadUrl: PYTHON_DOWNLOAD_URL },
+            )
         }
 
-        const verify = await runCommand(PYTHON_COMMAND, ['--version'])
+        const verify = await verifyPythonAfterInstall()
         if (verify.code !== 0) {
-            stepUpdate('python', 'error', 'Python installed but not on PATH. Restart required.')
-            throw new Error('python-path')
+            throw setupManualError(
+                'python-path',
+                `Python installed but is not on PATH. Install location was probed; if it still fails, install from ${PYTHON_DOWNLOAD_URL} and retry.`,
+                { downloadUrl: PYTHON_DOWNLOAD_URL },
+            )
         }
 
         const verifiedVersion = verify.stdout || verify.stderr || 'Python installed.'
@@ -400,12 +692,6 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         stepUpdate('ollama', 'running', 'Installing Ollama (sudo/admin prompt)...')
         log(`> ${invocation.command} ${invocation.args.join(' ')}`, 'dim')
 
-        function addDirToPath(dir) {
-            const current = String(process.env.PATH || '')
-            const parts = current.split(path.delimiter).filter(Boolean)
-            if (!parts.includes(dir)) process.env.PATH = [dir, ...parts].join(path.delimiter)
-        }
-
         let install = await runCommand(invocation.command, invocation.args)
         if (install.stdout) log(install.stdout, 'dim')
         if (install.code !== 0) {
@@ -426,24 +712,22 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             if (install.code !== 0) {
                 if (install.stderr) log(install.stderr, 'err')
                 log('Ollama installer did not succeed. Run the official command in a terminal, then retry.', 'err')
-                const err = new Error('ollama-install-failed')
-                err.offerLinuxInstall = true
-                err.stepSub = `Ollama install failed. Run: ${LINUX_OLLAMA_INSTALL_COMMAND}`
-                throw err
+                throw setupManualError(
+                    'ollama-install-failed',
+                    `Ollama install failed. Run: ${LINUX_OLLAMA_INSTALL_COMMAND}`,
+                    { offerLinuxInstall: true, downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL },
+                )
             }
         }
 
-        addDirToPath('/usr/local/bin')
-        let verify = await runCommand(OLLAMA_COMMAND, ['--version'])
-        if (verify.code !== 0) {
-            verify = await runCommand('/usr/local/bin/ollama', ['--version'])
-        }
+        const verify = await verifyOllamaAfterInstall()
         if (verify.code !== 0) {
             log('Ollama installer finished, but ollama is still not on PATH.', 'err')
-            const err = new Error('ollama-path')
-            err.offerLinuxInstall = true
-            err.stepSub = 'Ollama install finished but ollama is not on PATH. Open a new terminal, then retry.'
-            throw err
+            throw setupManualError(
+                'ollama-path',
+                'Ollama install finished but ollama is not on PATH. Open a new terminal, then retry.',
+                { offerLinuxInstall: true, downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL },
+            )
         }
 
         const verifiedVersion = verify.stdout || verify.stderr || 'Ollama is available.'
@@ -452,10 +736,11 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         stepUpdate('ollama', 'running', 'Checking whether Ollama is reachable...')
         if (!(await ollamaReachable(15, 1000))) {
             log('Ollama is installed but not reachable at ' + configuredOllamaBaseURL(), 'err')
-            const err = new Error('ollama-not-reachable')
-            err.offerLinuxInstall = true
-            err.stepSub = `Ollama installed but is not reachable at ${configuredOllamaBaseURL()}. Start it with ollama serve, then retry.`
-            throw err
+            throw setupManualError(
+                'ollama-not-reachable',
+                `Ollama installed but is not reachable at ${configuredOllamaBaseURL()}. Start it with ollama serve, then retry.`,
+                { offerLinuxInstall: true, downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL },
+            )
         }
 
         markDone('ollama', verifiedVersion.split('\n')[0])
@@ -467,12 +752,11 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         stepUpdate('ollama', 'running', 'Checking for Ollama...')
         log('> ollama --version', 'dim')
 
-        const { code, stdout, stderr } = await runCommand(OLLAMA_COMMAND, ['--version'])
-        const version = stdout || stderr
-
-        if (code === 0) {
-            log(version || 'Ollama is available.', 'ok')
-            markDone('ollama', (version || 'Ollama is available.').split('\n')[0])
+        const found = await verifyWithKnownPaths(OLLAMA_COMMAND, runtimeOllamaPaths())
+        if (found.code === 0) {
+            const foundVersion = found.stdout || found.stderr || 'Ollama is available.'
+            log(foundVersion.split('\n')[0], 'ok')
+            markDone('ollama', foundVersion.split('\n')[0])
             return
         }
 
@@ -486,12 +770,29 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             return
         }
 
-        if (process.platform !== 'win32') {
+        const plan = decideOllamaInstall({
+            platform: process.platform,
+            brewAvailable: process.platform === 'darwin' ? await brewIsAvailable() : undefined,
+            wingetAvailable: process.platform === 'win32' ? await wingetIsAvailable() : undefined,
+        })
+        const invocation = installCommandToRun(plan)
+
+        if (!invocation) {
+            log(plan.instructions || 'Ollama was not found on PATH.', 'err')
+            if (plan.downloadUrl) log(`Download: ${plan.downloadUrl}`, 'info')
+            throw setupManualError(
+                'ollama-install-required',
+                plan.instructions || `Install Ollama from ${OLLAMA_DOWNLOAD_URL}, then retry.`,
+                { downloadUrl: plan.downloadUrl || OLLAMA_DOWNLOAD_URL },
+            )
+        }
+
+        if (plan.action === 'homebrew') {
             log('Ollama not found. Trying Homebrew...', 'info')
             stepUpdate('ollama', 'running', 'Installing Ollama via Homebrew...')
             const installed = await installWithBrew('ollama')
             if (installed) {
-                const verify = await runCommand(OLLAMA_COMMAND, ['--version'])
+                const verify = await verifyOllamaAfterInstall()
                 const verifiedVersion = verify.stdout || verify.stderr
                 if (verify.code === 0) {
                     log((verifiedVersion || 'Ollama is available.').split('\n')[0], 'ok')
@@ -499,32 +800,37 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                     return
                 }
             }
-            log('Ollama was not found on PATH. Install it from ollama.com, then retry.', 'err')
-            stepUpdate('ollama', 'error', 'Install Ollama from ollama.com and make sure it is on PATH.')
-            throw new Error('ollama-install-required')
+            log(`Ollama was not found on PATH. Install it from ${OLLAMA_DOWNLOAD_URL}, then retry.`, 'err')
+            throw setupManualError(
+                'ollama-install-required',
+                `Install Ollama from ${OLLAMA_DOWNLOAD_URL}, then retry.`,
+                { downloadUrl: OLLAMA_DOWNLOAD_URL },
+            )
         }
 
         log('Ollama not found. Installing via winget...', 'info')
         stepUpdate('ollama', 'running', 'Installing Ollama via winget...')
         log('> winget install Ollama.Ollama --silent', 'dim')
 
-        const install = await runCommand('winget', [
-            'install', 'Ollama.Ollama',
-            '--silent',
-            '--accept-package-agreements',
-            '--accept-source-agreements',
-        ])
+        const install = await runCommand(invocation.command, invocation.args)
 
         if (install.code !== 0) {
             log(install.stderr || 'winget failed', 'err')
-            stepUpdate('ollama', 'error', 'Could not install Ollama. Please install from ollama.com')
-            throw new Error('ollama-install-failed')
+            log(`Install Ollama from ${OLLAMA_DOWNLOAD_URL}, then retry.`, 'err')
+            throw setupManualError(
+                'ollama-install-failed',
+                `Could not install Ollama via winget. Install it from ${OLLAMA_DOWNLOAD_URL}, then retry.`,
+                { downloadUrl: OLLAMA_DOWNLOAD_URL },
+            )
         }
 
-        const verify = await runCommand(OLLAMA_COMMAND, ['--version'])
+        const verify = await verifyOllamaAfterInstall()
         if (verify.code !== 0) {
-            stepUpdate('ollama', 'error', 'Ollama installed but not on PATH. Restart may be required.')
-            throw new Error('ollama-path')
+            throw setupManualError(
+                'ollama-path',
+                `Ollama installed but is not on PATH. Install location was probed; if it still fails, install from ${OLLAMA_DOWNLOAD_URL} and retry.`,
+                { downloadUrl: OLLAMA_DOWNLOAD_URL },
+            )
         }
 
         const verifiedVersion = verify.stdout || verify.stderr || 'Ollama is available.'
@@ -852,6 +1158,7 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                 console.error(`[setup] step "${key}" failed:`, err.message)
                 const extra = {}
                 if (err && err.offerLinuxInstall) extra.offerLinuxInstall = true
+                if (err && err.downloadUrl) extra.downloadUrl = err.downloadUrl
                 stepUpdate(key, 'error', (err && err.stepSub) || err.message, extra)
                 // Stop here so the user can retry the failed step from onboarding.
                 return
@@ -997,6 +1304,13 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             return { ok: true }
         })
 
+        ipcMain.handle('open-setup-download', (_event, url) => {
+            const value = String(url || '')
+            if (!ALLOWED_SETUP_DOWNLOAD_URLS.has(value)) return false
+            if (!shell || typeof shell.openExternal !== 'function') return false
+            return shell.openExternal(value)
+        })
+
         ipcMain.handle('open-ollama-linux-download', () => {
             if (!shell || typeof shell.openExternal !== 'function') return false
             return shell.openExternal(LINUX_OLLAMA_DOWNLOAD_URL)
@@ -1060,7 +1374,16 @@ module.exports = {
     createSetup,
     evaluatePythonVersion,
     decideOllamaInstall,
+    decidePythonInstall,
+    installCommandToRun,
     ollamaInstallCommandToRun,
+    knownOllamaInstallPaths,
+    knownPythonInstallPaths,
+    firstExistingPath,
+    parseWindowsRegPathValue,
+    mergePathDirectories,
     LINUX_OLLAMA_INSTALL_COMMAND,
     LINUX_OLLAMA_DOWNLOAD_URL,
+    OLLAMA_DOWNLOAD_URL,
+    PYTHON_DOWNLOAD_URL,
 }

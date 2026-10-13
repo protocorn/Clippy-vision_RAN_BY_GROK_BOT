@@ -1410,13 +1410,14 @@
             }
           })
           body.appendChild(installBtn)
-          if (!el.querySelector('.download-btn') && window.setup && window.setup.openOllamaLinuxDownload) {
-            const downloadBtn = document.createElement('button')
-            downloadBtn.className = 'download-btn'
-            downloadBtn.textContent = 'Open ollama.com/download/linux'
-            downloadBtn.addEventListener('click', () => window.setup.openOllamaLinuxDownload())
-            body.appendChild(downloadBtn)
-          }
+        }
+        const downloadUrl = extra && extra.downloadUrl
+        if (downloadUrl && !el.querySelector('.download-btn') && window.setup && window.setup.openSetupDownload) {
+          const downloadBtn = document.createElement('button')
+          downloadBtn.className = 'download-btn'
+          downloadBtn.textContent = 'Open ' + String(downloadUrl).replace(/^https:\/\//, '')
+          downloadBtn.addEventListener('click', () => window.setup.openSetupDownload(downloadUrl))
+          body.appendChild(downloadBtn)
         }
       }
 
@@ -1485,8 +1486,8 @@
     }
 
     if (window.setup) {
-      window.setup.onStepUpdate(({ key, state, sub, offerLinuxInstall }) => {
-        setStepState(key, state, sub, { offerLinuxInstall })
+      window.setup.onStepUpdate(({ key, state, sub, offerLinuxInstall, downloadUrl }) => {
+        setStepState(key, state, sub, { offerLinuxInstall, downloadUrl })
         if (state === 'done') {
           requestAnimationFrame(() => {
             const allDone = STEPS.every(k => {

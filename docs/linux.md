@@ -86,7 +86,7 @@ To point Clippy at a specific interpreter **before** launch:
 export CLIPPY_PYTHON=/path/to/venv/bin/python3
 ```
 
-**The wizard does not apt-install Python on Linux.** If `python3` is missing, it tries Homebrew `brew install python` when `brew` is already present. If that fails, the log says “Install Python 3.11+ from python.org or Homebrew, then retry.” and the step error is “Install Python 3.11+ and make sure it is on PATH.” Comment in `setup.js`: “Linux stays a manual install.”
+**The wizard does not install Python on Linux.** If `python3` is missing, it does **not** try Homebrew. It shows a clear manual-install message with a link to [https://www.python.org/downloads/](https://www.python.org/downloads/). Retry after you install Python 3.11+ and put it on PATH. Comment in `setup.js`: “Linux stays a manual install.”
 
 CI unit tests and the AppImage dry-run use **Python 3.12**.
 
@@ -223,7 +223,7 @@ That snippet is the macOS check from `docs/usage.md` with the Linux `userData` p
 
 | You see | Meaning | What to do (from the code / existing docs) |
 |---------|---------|--------------------------------------------|
-| Wizard: “Python is missing” / “Install Python 3.11+ and make sure it is on PATH.” | No usable 3.11+ interpreter | Install Python 3.11+ yourself. Set `CLIPPY_PYTHON` if it is not `python3` on PATH. The wizard will not `apt-get install` Python. |
+| Wizard: “Python is missing” / python.org link | No usable 3.11+ interpreter | Install Python 3.11+ from [python.org/downloads](https://www.python.org/downloads/). Set `CLIPPY_PYTHON` if it is not `python3` on PATH. The wizard will not `apt-get install` Python. |
 | Wizard: “Ollama is not installed” / install from ollama.com | `ollama` not on PATH | Install with `curl -fsSL https://ollama.com/install.sh \| sh`, or click **Install** in the wizard (needs sudo). See [https://ollama.com/download/linux](https://ollama.com/download/linux) and [usage.md](usage.md#ollama-not-found-after-install). |
 | `[platform_support] xdotool not found; window metadata will be limited` | No `xdotool` | Install `xdotool`. Titles and focused-window crop stay limited until it is on PATH. |
 | `[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)` | Neither idle helper found | Install `xprintidle` and/or `xdotool`. |
