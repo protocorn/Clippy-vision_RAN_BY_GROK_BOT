@@ -1,6 +1,6 @@
 # Linux install and run (experimental)
 
-Clippy Vision on Linux is **experimental and X11 only. Wayland is not supported.** Log in to an X11 session. This page is the install and run guide. It only states behavior that is in the source or existing docs. Anything not confirmed in this repository is marked **not verified yet**.
+Linux support is **experimental and X11 only. Wayland is not supported.** Log in to an X11 session. This page is the install and run guide. It only states behavior that is in the source or existing docs. Anything not confirmed in this repository is marked **not verified yet**.
 
 Day-to-day capture and privacy: [usage.md](usage.md). Connecting an agent: [mcp.md](mcp.md). Building from source and CI test commands: [CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -69,7 +69,7 @@ export CLIPPY_PYTHON=/path/to/venv/bin/python3
 
 CI unit tests and the AppImage dry-run use **Python 3.12**.
 
-**Published v2.1.0 AppImage:** **you still need system Python 3.11+.** Python is not bundled. The wizard text in that build still says 3.9+ (a known copy bug; [CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)). Do not treat 3.9 as enough. Current `main` parses `--version` and rejects anything below 3.11.
+**Published v2.1.0 AppImage:** v2.1.0 needs system Python 3.11 or newer, even though the v2.1.0 setup wizard text still says 3.9+ (a known copy bug). Python is not bundled. Do not treat 3.9 as enough ([CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)). Current `main` parses `--version` and rejects anything below 3.11.
 
 ---
 
