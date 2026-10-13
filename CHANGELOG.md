@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Post-v2.1.0 work on main. Verification is **CI-only** unless a line says otherwise. Nothing below is **real machine** tested. The published v2.1.0 Windows installer and Linux AppImage were not rebuilt.
 
 ### Added
+- Linux install and run guide (`docs/linux.md`) (part of [#5](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/issues/5)) — documentation. No real-machine testing.
 - Chat retrieval-time privacy (password-manager process opt-out, private/redacted/Clippy windows, selected-apps mode, private sessions; drop the event if a privacy check raises), NULL-safe prompt fields, session lookback from local midnight with 60-minute events, and untrusted/no-guess prompt instructions ([#34](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/34), part of [#6](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/issues/6)) — **CI-only** (pytest chat context and endpoints on ubuntu-latest and windows-latest). Does not start Ollama.
 - Copy diagnostics button in Settings → About ([#42](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/42), closes [#17](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/issues/17)) — **CI-only**. Copied JSON is counts, sizes, and machine/settings metadata only (no captured content). Not tested on a signed-in packaged Electron install. **Not real machine.**
 

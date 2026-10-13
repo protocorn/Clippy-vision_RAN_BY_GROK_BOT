@@ -80,7 +80,7 @@ $env:CLIPPY_PYTHON = "C:\path\to\python.exe"
 export CLIPPY_PYTHON=/path/to/venv/bin/python3
 ```
 
-**Linux support (experimental):** Capture runs with limited features. On **X11**, screenshots use `mss` (optional crop to the focused window via `xdotool`). On **native Wayland**, screenshots are skipped until xdg-desktop-portal support lands (blank XWayland grabs are not stored); wlroots users can install `grim` for captures. Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented ([#20](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/20)); it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI.
+**Linux support (experimental):** Capture runs with limited features. On **X11**, screenshots use `mss` (optional crop to the focused window via `xdotool`). On **native Wayland**, screenshots are skipped until xdg-desktop-portal support lands (blank XWayland grabs are not stored); wlroots users can install `grim` for captures. Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented ([#20](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/20)); it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
@@ -130,6 +130,7 @@ Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usag
 | Guide | Contents |
 |-------|----------|
 | [docs/usage.md](docs/usage.md) | Capture controls, privacy, accessibility, install troubleshooting |
+| [docs/linux.md](docs/linux.md) | Experimental Linux install and run (AppImage, Python, X11/Wayland, capture tools) |
 | [docs/mcp.md](docs/mcp.md) | Supported clients, Copy JSON, tool reference, access permissions |
 | [docs/mcp-clients/claude-desktop.md](docs/mcp-clients/claude-desktop.md) | Step-by-step Claude Desktop setup: config location, restart, verification |
 | [docs/mcp-clients/lm-studio.md](docs/mcp-clients/lm-studio.md) | Step-by-step LM Studio setup: MCP configuration, local model, test query, privacy |

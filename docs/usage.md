@@ -49,7 +49,7 @@ Coverage depends on the operating system. "Untested" means detection is attempte
 | Vivaldi | Covered | Not covered | Not yet |
 | Safari | Not covered | Not covered | Not yet |
 
-Windows detection is exercised by unit tests in CI only. On Linux there is no private-window detection yet, so a private window is captured like any other. Pause capture when a private window must not be stored.
+Windows detection is exercised by unit tests in CI only. On Linux there is no private-window detection yet, so a private window is captured like any other. Pause capture when a private window must not be stored. Linux install, capture helpers, and these privacy limits: [linux.md](linux.md#privacy-limits-on-linux).
 
 ### What the privacy layer does
 
@@ -63,7 +63,7 @@ Before text or a screenshot is stored, Clippy tries to:
 **OS-level opt-out mechanisms honored:**
 - **Windows**: `SetWindowDisplayAffinity` with `WDA_EXCLUDEFROMCAPTURE` or `WDA_MONITOR` (used by password managers and some secure apps)
 - **macOS**: `NSWindowSharingNone` (`kCGWindowSharingState == 0`) on the frontmost window of the foreground app, via CGWindowList
-- **Linux**: No standardized per-window mechanism. Clippy falls back to an exact-name list of well-known password managers (not substring matching). Browser private windows stay on the existing private-window path.
+- **Linux**: No standardized per-window mechanism. Clippy falls back to an exact-name list of well-known password managers (not substring matching). Browser private windows stay on the existing private-window path. Details: [linux.md](linux.md#privacy-limits-on-linux).
 
 The same redactor runs again on every MCP tool reply. Screenshot file paths are left out. A window you marked private is returned as "This moment was private" with the app and time only. If that filter fails, the tool returns nothing. The copy on this computer is unchanged.
 
@@ -132,6 +132,10 @@ The disk image is unsigned. Right-click Clippy Vision and choose **Open**, then 
 
 The setup wizard uses Homebrew when Homebrew is already installed to install Python and Ollama. If Homebrew is missing, install Python 3.11+ and Ollama yourself, then retry setup. `brew install ollama` is the same step the wizard tries when Homebrew is present.
 
+### Linux AppImage
+
+Linux support is experimental. The unsigned AppImage, Python 3.11+ (not bundled), capture helpers, X11 vs Wayland, and known warnings are in [linux.md](linux.md). The wizard does not apt-install Python on Linux.
+
 ### Ollama not found after install
 
 Open a new terminal and run `ollama --version`. If not found, re-run setup or install it from [ollama.com](https://ollama.com/download).
@@ -160,6 +164,8 @@ python3 -c "import json,urllib.request,pathlib; p=pathlib.Path.home()/'Library/A
 ---
 
 ## File locations (installed)
+
+Linux packaged paths: [linux.md](linux.md#file-locations-packaged-linux).
 
 | Item | Windows | macOS |
 |------|---------|-------|
