@@ -57,7 +57,7 @@ The installers are unsigned: on Windows choose **More info → Run anyway**, and
 
 | | Minimum | Recommended |
 |--|---------|-------------|
-| OS | Windows 10 / 11 (64-bit), macOS 12+, or Linux (Ubuntu 22.04+, experimental) | Windows 11 or a current macOS |
+| OS | Windows 10 / 11 (64-bit), macOS 12+, or Linux (Ubuntu 22.04+, experimental, X11 only) | Windows 11 or a current macOS |
 | System RAM | 8 GB | 16 GB |
 | Graphics memory | Not required. Integrated graphics or Apple unified memory is enough | 4 GB+ dedicated on Windows, or 16 GB unified memory on Apple silicon |
 | Free disk | 8 GB | 10 GB+ |
@@ -80,7 +80,7 @@ $env:CLIPPY_PYTHON = "C:\path\to\python.exe"
 export CLIPPY_PYTHON=/path/to/venv/bin/python3
 ```
 
-**Linux support (experimental):** Capture runs with limited features. On **X11**, screenshots use `mss` (optional crop to the focused window via `xdotool`). On **native Wayland**, screenshots are skipped until xdg-desktop-portal support lands (blank XWayland grabs are not stored); wlroots users can install `grim` for captures. Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented ([#20](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/20)); it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI.
+Linux support is **experimental and X11 only. Wayland is not supported.** On X11, screenshots use `mss` (optional crop via `xdotool`). Window titles use `xdotool`, clipboard uses `wl-paste`/`xclip`/`xsel`. AT-SPI accessibility text is implemented ([#20](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/pull/20)); it is covered by CI unit tests, not a real desktop. An unsigned Linux AppImage is built in CI. Install and run steps: [docs/linux.md](docs/linux.md).
 
 The setup wizard checks these numbers before installing. Below minimum → setup is blocked. Between minimum and recommended → you can continue with a warning that summaries may feel slower. Homebrew, dependency, and permission troubleshooting: [docs/usage.md](docs/usage.md#installation-troubleshooting). Lower-spec machines: [CONTRIBUTING.md](CONTRIBUTING.md#lower-spec-machines).
 
@@ -130,6 +130,7 @@ Full guide (retention defaults and detailed behavior): [docs/usage.md](docs/usag
 | Guide | Contents |
 |-------|----------|
 | [docs/usage.md](docs/usage.md) | Capture controls, privacy, accessibility, install troubleshooting |
+| [docs/linux.md](docs/linux.md) | Experimental Linux install and run (X11 only; AppImage, Python, capture tools) |
 | [docs/mcp.md](docs/mcp.md) | Supported clients, Copy JSON, tool reference, access permissions |
 | [docs/mcp-clients/claude-desktop.md](docs/mcp-clients/claude-desktop.md) | Step-by-step Claude Desktop setup: config location, restart, verification |
 | [docs/mcp-clients/lm-studio.md](docs/mcp-clients/lm-studio.md) | Step-by-step LM Studio setup: MCP configuration, local model, test query, privacy |
