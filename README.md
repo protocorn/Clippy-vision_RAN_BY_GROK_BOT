@@ -1,3 +1,5 @@
+> **This repo has moved.** All code, history, and open issues now live at [protocorn/clippy-vision](https://github.com/protocorn/clippy-vision). Download the latest release [there](https://github.com/protocorn/clippy-vision/releases/latest). This copy is archived and read-only.
+
 # Clippy Vision
 
 > **⚠️ IMPORTANT NOTICE**
