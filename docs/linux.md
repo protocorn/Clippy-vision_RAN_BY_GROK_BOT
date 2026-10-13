@@ -1,6 +1,6 @@
 # Linux install and run (experimental)
 
-Clippy Vision on Linux is **experimental**. This page is the install and run guide. It only states behavior that is in the source or existing docs. Anything not confirmed in this repository is marked **not verified yet**.
+Clippy Vision on Linux is **experimental and X11 only. Wayland is not supported.** Log in to an X11 session. This page is the install and run guide. It only states behavior that is in the source or existing docs. Anything not confirmed in this repository is marked **not verified yet**.
 
 Day-to-day capture and privacy: [usage.md](usage.md). Connecting an agent: [mcp.md](mcp.md). Building from source and CI test commands: [CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -10,21 +10,21 @@ Day-to-day capture and privacy: [usage.md](usage.md). Connecting an agent: [mcp.
 
 | | What the repo says |
 |--|--------------------|
-| Stated OS | Ubuntu 22.04+ (experimental). The setup wizard OS check labels Linux as `Linux (supported, experimental)` and shows the requirement `Ubuntu 22.04+ (experimental)` (`electron-ui/electron/lib/hardware.js`, `electron-ui/src/setup.html`). |
-| Architecture | Linux AppImage is **x86_64 / x64 only** (`electron-ui/package.json` `build.linux`). |
+| Stated OS | Ubuntu 22.04+ (experimental), **X11 only**. Wayland is not supported. The setup wizard OS check labels Linux as `Linux (supported, experimental)` and shows the requirement `Ubuntu 22.04+ (experimental)` (`electron-ui/electron/lib/hardware.js`, `electron-ui/src/setup.html`). |
+| Architecture | Linux AppImage is **x86_64 only** (`electron-ui/package.json` `build.linux.artifactName`: `ClippyVision-Linux-x86_64-${version}.AppImage`; #33 pinned that name). |
 | Recommended hardware | Same wizard minima as Windows: 8 GB RAM and 8 GB free disk to continue; 16 GB RAM and 10 GB disk recommended. Below minimum blocks setup. Between minimum and recommended, you can continue with a warning. Linux with no discrete NVIDIA GPU (nvidia-smi reports 0) grades VRAM from system RAM (`hardware.js`). |
 | **CI (pytest)** | Ubuntu runner, Python 3.12. Platform-filtered unit tests, plus an Xvfb screenshot test: `xvfb-run -a pytest tests/test_linux_screenshot_capture.py -v -m "linux" -k "xvfb"` (`.github/workflows/tests.yml`). That Xvfb job installs `xvfb`, `x11-xserver-utils`, and `xterm` only. |
 | **CI (AppImage)** | Unsigned AppImage built with `npm run dist:linux`. Smoke check: `chmod +x`, then `./…AppImage --appimage-extract`, then looks for `squashfs-root/clippy-vision` or `squashfs-root/AppRun`. Launch test: Xvfb `:99`, `libfuse2` installed, setup pre-seeded, Ollama stubbed, `CLIPPY_PYTHON` pointed at the runner’s Python 3.12. Proves the packaged app can spawn the backend and `GET /health` returns 200. **Does not prove** the setup wizard, Ollama, a real model, or a real desktop (`.github/workflows/release.yml`). |
 | **Real desktop** | Nobody has run this fork’s Linux capture, wizard, or AppImage on a physical desktop. Treat every capture path below as **not verified yet** on GNOME, KDE, Sway, or any other compositor. |
 
-Other distros, ARM, and native Wayland desktops are **not verified yet**.
+Other distros and ARM are **not verified yet**. Wayland is **not supported** (log in to X11).
 
 ---
 
 ## Get the AppImage
 
-1. Open this fork’s [GitHub Releases](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/releases). Official upstream releases (if you want those instead) are at [protocorn/clippy-vision/releases](https://github.com/protocorn/clippy-vision/releases).
-2. Download the Linux artifact. The release workflow and `electron-builder` name it:
+1. Download the published AppImage from the [v2.1.0 release](https://github.com/protocorn/Clippy-vision_RAN_BY_GROK_BOT/releases/tag/v2.1.0). That tag is this fork’s Linux build. The upstream `protocorn/clippy-vision` repo did not publish it.
+2. The release workflow and `electron-builder` name the artifact:
 
    `ClippyVision-Linux-x86_64-${version}.AppImage`
 
@@ -69,7 +69,7 @@ export CLIPPY_PYTHON=/path/to/venv/bin/python3
 
 CI unit tests and the AppImage dry-run use **Python 3.12**.
 
-**Published v2.1.0 AppImage:** that build predates the 3.11+ parse ([CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)). Its wizard copy still says 3.9+, and it accepted any interpreter whose `--version` succeeded. Current `main` requires 3.11+.
+**Published v2.1.0 AppImage:** **you still need system Python 3.11+.** Python is not bundled. The wizard text in that build still says 3.9+ (a known copy bug; [CHANGELOG.md](../CHANGELOG.md) / [release notes](release-notes/v2.1.0.md)). Do not treat 3.9 as enough. Current `main` parses `--version` and rejects anything below 3.11.
 
 ---
 
@@ -84,7 +84,7 @@ None of these are bundled. Clippy looks them up with `shutil.which` and degrades
 | `wl-paste` | Clipboard (tried first) | Falls through to `xclip`, then `xsel` | `wl-clipboard` (provides `wl-paste`; listed in [v2.1.0 notes](release-notes/v2.1.0.md)) |
 | `xclip` | Clipboard if `wl-paste` is absent | Falls through to `xsel` | `xclip` |
 | `xsel` | Clipboard if the others are absent | Clipboard capture returns nothing (no dedicated warning) | `xsel` |
-| `grim` | Screenshots on a **Wayland** session (`grim -`) | Native Wayland screenshots are skipped unless `mss` on `DISPLAY` returns a non-blank frame (often blank under XWayland) | `grim` — **not verified on a real wlroots desktop** |
+| `grim` | Code may call `grim -` if the session is detected as Wayland | **Wayland is not supported.** Do not treat `grim` as a supported workaround. Log in to X11. | `grim` — present in code; **unsupported** as a user path |
 | `python3-pyatspi` | AT-SPI accessible text | Accessibility text is empty. One-time warning tells you to install `python3-pyatspi` | `python3-pyatspi` (`requirements.txt` comment: `apt install python3-pyatspi`). **CI-only** (mocked unit tests). Not tried on a real desktop. |
 
 `xclip`, `xsel`, `wl-clipboard`, `grim`, and `xprintidle` are **not** installed by the pytest or AppImage jobs except where the table says otherwise. Exact `apt-get` lines for a personal desktop are **not verified yet**.
@@ -94,6 +94,8 @@ AT-SPI extra: the warning also says that if you use a venv, recreate it with `--
 ---
 
 ## X11 vs Wayland
+
+**Supported session: X11.** Wayland is not supported. If `echo "$XDG_SESSION_TYPE"` prints `wayland`, log out and choose an X11 session (often labeled “Ubuntu on Xorg” or similar — the exact login-menu name is **not verified yet**).
 
 Session kind is read in `core/linux_screenshot.py` (`linux_session_type()`), in this order:
 
@@ -115,20 +117,18 @@ echo "$WAYLAND_DISPLAY"
 echo "$DISPLAY"
 ```
 
-| Session | Screenshots | Notes |
-|---------|-------------|--------|
-| **X11** | `mss` (needs `DISPLAY`). Crop to the focused window when `xdotool` can return geometry. Blank/all-black frames are not stored. | This is the path the Xvfb pytest exercises. |
-| **Wayland** | If `grim` is on `PATH`, Clippy tries `grim -`. If `DISPLAY` is set, it may also try `mss`. A blank grab is discarded (XWayland grabs are often blank). If nothing usable is captured, Clippy skips the screenshot. | xdg-desktop-portal screenshot support is **not implemented**. |
-| **unknown** / no `DISPLAY` | Same skip/warning path as a Wayland miss when there is no usable grab | |
+| Session | Status | What the code does | What you should do |
+|---------|--------|--------------------|--------------------|
+| **X11** | **Supported (experimental)** | `mss` (needs `DISPLAY`). Crop to the focused window when `xdotool` can return geometry. Blank/all-black frames are not stored. | Use this session. This is the path the Xvfb pytest exercises. |
+| **Wayland** | **Unsupported** | If `grim` is on `PATH`, the code may try `grim -`. If `DISPLAY` is set, it may also try `mss`. Blank grabs (typical under XWayland) are discarded. xdg-desktop-portal is **not implemented**. | Log in to an **X11** session. `grim` is not a supported workaround. |
+| **unknown** / no `DISPLAY` | **Unsupported** | Same skip/warning path as a Wayland miss when there is no usable grab | Log in to X11 so `XDG_SESSION_TYPE=x11` and `DISPLAY` are set. |
 
-One-time stderr warnings:
+One-time stderr warnings (you should not stay on Wayland to “work around” them):
 
 - `[capture] Linux Wayland screenshots are not supported yet (xdg-desktop-portal not implemented); skipping blank captures`
 - `[capture] screenshot grab returned a blank frame; skipping`
 
-`xdotool` is an X11 tool. On a native Wayland session it may be missing or fail; window titles and focused-window crop then degrade as in the table above. That Wayland-without-xdotool path is **not verified yet** on a real desktop.
-
-Clipboard prefers `wl-paste` (Wayland), then `xclip` / `xsel` (X11).
+`xdotool` is an X11 tool. Clipboard code tries `wl-paste` first, then `xclip` / `xsel`; on an X11 session, `xclip` or `xsel` is what you want.
 
 ---
 
@@ -206,7 +206,7 @@ That snippet is the macOS check from `docs/usage.md` with the Linux `userData` p
 | Wizard: “Ollama is not installed” / install from ollama.com | `ollama` not on PATH and Homebrew install did not run or failed | Install from [ollama.com](https://ollama.com/download), then retry. See [usage.md](usage.md#ollama-not-found-after-install). |
 | `[platform_support] xdotool not found; window metadata will be limited` | No `xdotool` | Install `xdotool`. Titles and focused-window crop stay limited until it is on PATH. |
 | `[platform_support] Linux idle detection unavailable (xprintidle or xdotool not found)` | Neither idle helper found | Install `xprintidle` and/or `xdotool`. |
-| `[capture] Linux Wayland screenshots are not supported yet…` | Wayland session (or no `DISPLAY`) and no usable grim/`mss` frame | X11 session, or `grim` on a wlroots compositor. Portal capture is not implemented. |
+| `[capture] Linux Wayland screenshots are not supported yet…` | Session is Wayland (or no `DISPLAY`) | **Wayland is not supported.** Log in to an X11 session. Do not rely on `grim`. |
 | `[capture] screenshot grab returned a blank frame; skipping` | Grab was empty/all-black | Typical for XWayland-only grabs. Blank frames are not stored. |
 | `[accessibility_text] pyatspi not available; install python3-pyatspi…` | `import pyatspi` failed | `apt install python3-pyatspi`. Venv: `--system-site-packages` or `python3-gi`. |
 | `[accessibility_text] AT-SPI desktop not available (accessibility may be disabled)` | `Registry.getDesktop(0)` was `None` | Desktop accessibility may be off. **Not verified yet** how to enable it on a given DE. |
