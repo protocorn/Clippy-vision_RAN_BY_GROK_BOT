@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('setup', {
 
     retryStep: (key) => ipcRenderer.invoke('retry-step', key),
 
+    openOllamaLinuxDownload: () => ipcRenderer.invoke('open-ollama-linux-download'),
+
     getSetupContext: () => ipcRenderer.invoke('get-setup-context'),
 
     startRecoverySetup: () => ipcRenderer.invoke('start-recovery-setup'),

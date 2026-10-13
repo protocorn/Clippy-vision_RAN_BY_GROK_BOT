@@ -30,7 +30,80 @@ function evaluatePythonVersion(output) {
     }
 }
 
-function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunched }) {
+const LINUX_OLLAMA_INSTALL_COMMAND = 'curl -fsSL https://ollama.com/install.sh | sh'
+const LINUX_OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download/linux'
+
+function decideOllamaInstall({ platform, userConsent } = {}) {
+    if (platform === 'win32') {
+        return {
+            action: 'winget',
+            runInstall: true,
+            command: 'winget',
+            args: [
+                'install', 'Ollama.Ollama',
+                '--silent',
+                '--accept-package-agreements',
+                '--accept-source-agreements',
+            ],
+        }
+    }
+    if (platform === 'darwin') {
+        return {
+            action: 'homebrew',
+            runInstall: true,
+            command: 'brew',
+            args: ['install', 'ollama'],
+        }
+    }
+    if (platform === 'linux') {
+        if (userConsent) {
+            return {
+                action: 'linux-install',
+                runInstall: true,
+                command: 'pkexec',
+                args: ['sh', '-c', LINUX_OLLAMA_INSTALL_COMMAND],
+                officialCommand: LINUX_OLLAMA_INSTALL_COMMAND,
+                downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL,
+            }
+        }
+        return {
+            action: 'linux-manual',
+            runInstall: false,
+            command: null,
+            args: null,
+            officialCommand: LINUX_OLLAMA_INSTALL_COMMAND,
+            downloadUrl: LINUX_OLLAMA_DOWNLOAD_URL,
+            instructions: [
+                'Ollama was not found on PATH.',
+                `Install it with: ${LINUX_OLLAMA_INSTALL_COMMAND}`,
+                `Or download from ${LINUX_OLLAMA_DOWNLOAD_URL}`,
+                'The wizard runs that installer only after you click Install and confirm it needs sudo/admin rights.',
+            ].join(' '),
+        }
+    }
+    return {
+        action: 'unsupported',
+        runInstall: false,
+        command: null,
+        args: null,
+    }
+}
+
+function ollamaInstallCommandToRun(plan) {
+    if (!plan || !plan.runInstall || !plan.command) return null
+    return { command: plan.command, args: Array.isArray(plan.args) ? plan.args : [] }
+}
+
+function linuxOllamaMissingError(message) {
+    const err = new Error('ollama-install-required')
+    err.offerLinuxInstall = true
+    err.stepSub = message || (
+        `Install Ollama first. Official command: ${LINUX_OLLAMA_INSTALL_COMMAND} — ${LINUX_OLLAMA_DOWNLOAD_URL}`
+    )
+    return err
+}
+
+function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunched, dialog, shell }) {
     const {
         ROOT,
         DATA_DIR,
@@ -70,8 +143,13 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         console.log(`[setup/${level}]`, line)
     }
 
-    function stepUpdate(key, stateVal, sub) {
-        sendSetup('step-update', { key, state: stateVal, sub })
+    function stepUpdate(key, stateVal, sub, extra) {
+        sendSetup('step-update', {
+            key,
+            state: stateVal,
+            sub,
+            ...(extra && typeof extra === 'object' ? extra : {}),
+        })
     }
 
     function stepProgress(key, percent) {
@@ -287,6 +365,102 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         throw new Error('python-version-required')
     }
 
+    async function confirmLinuxOllamaInstall() {
+        if (!dialog || typeof dialog.showMessageBox !== 'function') return false
+        const parent = state.setupWindow && !state.setupWindow.isDestroyed()
+            ? state.setupWindow
+            : undefined
+        const options = {
+            type: 'warning',
+            buttons: ['Cancel', 'Install'],
+            defaultId: 1,
+            cancelId: 0,
+            noLink: true,
+            title: 'Install Ollama',
+            message: 'Install Ollama with the official Linux installer?',
+            detail: 'This needs sudo/admin rights. You will be asked for your password. Clippy will not run the installer automatically.',
+        }
+        const result = parent
+            ? await dialog.showMessageBox(parent, options)
+            : await dialog.showMessageBox(options)
+        return result.response === 1
+    }
+
+    async function handleLinuxOllamaMissing(plan) {
+        const invocation = ollamaInstallCommandToRun(plan)
+        if (!invocation) {
+            log('Ollama not found. Homebrew is not used on Linux.', 'info')
+            if (plan && plan.instructions) log(plan.instructions, 'err')
+            log(`Official install: ${LINUX_OLLAMA_INSTALL_COMMAND}`, 'info')
+            log(`Download: ${LINUX_OLLAMA_DOWNLOAD_URL}`, 'info')
+            throw linuxOllamaMissingError()
+        }
+
+        log('Ollama not found. Running the official Linux installer with your consent...', 'info')
+        stepUpdate('ollama', 'running', 'Installing Ollama (sudo/admin prompt)...')
+        log(`> ${invocation.command} ${invocation.args.join(' ')}`, 'dim')
+
+        function addDirToPath(dir) {
+            const current = String(process.env.PATH || '')
+            const parts = current.split(path.delimiter).filter(Boolean)
+            if (!parts.includes(dir)) process.env.PATH = [dir, ...parts].join(path.delimiter)
+        }
+
+        let install = await runCommand(invocation.command, invocation.args)
+        if (install.stdout) log(install.stdout, 'dim')
+        if (install.code !== 0) {
+            if (install.stderr) log(install.stderr, 'err')
+            const missingPkexec = /not found|ENOENT|spawn pkexec/i.test(install.stderr || '')
+            if (missingPkexec) {
+                log('pkexec not available. Opening a visible terminal for the official installer...', 'info')
+                stepUpdate('ollama', 'running', 'Installing Ollama in a terminal...')
+                const script = `${LINUX_OLLAMA_INSTALL_COMMAND}; echo; echo Press Enter to return to Clippy; read`
+                log(`> x-terminal-emulator -e bash -c "${LINUX_OLLAMA_INSTALL_COMMAND}"`, 'dim')
+                install = await runCommand('x-terminal-emulator', ['-e', 'bash', '-c', script])
+                if (install.code !== 0) {
+                    log('Trying xterm...', 'info')
+                    install = await runCommand('xterm', ['-e', 'bash', '-c', script])
+                }
+                if (install.stdout) log(install.stdout, 'dim')
+            }
+            if (install.code !== 0) {
+                if (install.stderr) log(install.stderr, 'err')
+                log('Ollama installer did not succeed. Run the official command in a terminal, then retry.', 'err')
+                const err = new Error('ollama-install-failed')
+                err.offerLinuxInstall = true
+                err.stepSub = `Ollama install failed. Run: ${LINUX_OLLAMA_INSTALL_COMMAND}`
+                throw err
+            }
+        }
+
+        addDirToPath('/usr/local/bin')
+        let verify = await runCommand(OLLAMA_COMMAND, ['--version'])
+        if (verify.code !== 0) {
+            verify = await runCommand('/usr/local/bin/ollama', ['--version'])
+        }
+        if (verify.code !== 0) {
+            log('Ollama installer finished, but ollama is still not on PATH.', 'err')
+            const err = new Error('ollama-path')
+            err.offerLinuxInstall = true
+            err.stepSub = 'Ollama install finished but ollama is not on PATH. Open a new terminal, then retry.'
+            throw err
+        }
+
+        const verifiedVersion = verify.stdout || verify.stderr || 'Ollama is available.'
+        log(verifiedVersion.split('\n')[0], 'ok')
+
+        stepUpdate('ollama', 'running', 'Checking whether Ollama is reachable...')
+        if (!(await ollamaReachable(15, 1000))) {
+            log('Ollama is installed but not reachable at ' + configuredOllamaBaseURL(), 'err')
+            const err = new Error('ollama-not-reachable')
+            err.offerLinuxInstall = true
+            err.stepSub = `Ollama installed but is not reachable at ${configuredOllamaBaseURL()}. Start it with ollama serve, then retry.`
+            throw err
+        }
+
+        markDone('ollama', verifiedVersion.split('\n')[0])
+    }
+
     async function stepCheckOllama() {
         // Ollama is the only active provider in this release, so setup always
         // verifies the local runtime before downloading any model weights.
@@ -299,6 +473,16 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
         if (code === 0) {
             log(version || 'Ollama is available.', 'ok')
             markDone('ollama', (version || 'Ollama is available.').split('\n')[0])
+            return
+        }
+
+        if (process.platform === 'linux') {
+            const plan = decideOllamaInstall({
+                platform: 'linux',
+                userConsent: Boolean(state.ollamaLinuxInstallConsented),
+            })
+            state.ollamaLinuxInstallConsented = false
+            await handleLinuxOllamaMissing(plan)
             return
         }
 
@@ -666,7 +850,9 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
                 await stepFns[key]()
             } catch (err) {
                 console.error(`[setup] step "${key}" failed:`, err.message)
-                stepUpdate(key, 'error', err.message)
+                const extra = {}
+                if (err && err.offerLinuxInstall) extra.offerLinuxInstall = true
+                stepUpdate(key, 'error', (err && err.stepSub) || err.message, extra)
                 // Stop here so the user can retry the failed step from onboarding.
                 return
             }
@@ -793,9 +979,27 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
             return { ok: true, check }
         })
 
-        ipcMain.handle('retry-step', (_event, key) => {
+        ipcMain.handle('retry-step', async (_event, keyOrOpts) => {
+            const payload = typeof keyOrOpts === 'string' || keyOrOpts == null
+                ? { key: keyOrOpts }
+                : keyOrOpts
+            const key = payload.key
+            const userConsent = Boolean(payload.userConsent)
+            if (key === 'ollama' && userConsent && process.platform === 'linux') {
+                const confirmed = await confirmLinuxOllamaInstall()
+                if (!confirmed) return { ok: false, cancelled: true }
+                state.ollamaLinuxInstallConsented = true
+            } else if (key === 'ollama') {
+                state.ollamaLinuxInstallConsented = false
+            }
             state.doneSoFar = Math.max(0, state.doneSoFar - 1)
             runSetup(key)
+            return { ok: true }
+        })
+
+        ipcMain.handle('open-ollama-linux-download', () => {
+            if (!shell || typeof shell.openExternal !== 'function') return false
+            return shell.openExternal(LINUX_OLLAMA_DOWNLOAD_URL)
         })
 
         ipcMain.handle('get-setup-context', () => ({
@@ -852,4 +1056,11 @@ function createSetup({ paths, llmConfig, api, state, app, windowBridge, onLaunch
     }
 }
 
-module.exports = { createSetup, evaluatePythonVersion }
+module.exports = {
+    createSetup,
+    evaluatePythonVersion,
+    decideOllamaInstall,
+    ollamaInstallCommandToRun,
+    LINUX_OLLAMA_INSTALL_COMMAND,
+    LINUX_OLLAMA_DOWNLOAD_URL,
+}
